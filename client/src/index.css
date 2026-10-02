@@ -1,0 +1,96 @@
+/* src/index.css */
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --font-sans: "Manrope", system-ui, sans-serif;
+
+  --animate-drift: drift linear infinite;
+
+  @keyframes drift {
+    0% {
+      transform: translateY(10%) translateX(0);
+      opacity: 0;
+    }
+
+    10% {
+      opacity: 0.55;
+    }
+
+    90% {
+      opacity: 0.4;
+    }
+
+    100% {
+      transform: translateY(-120%) translateX(6%);
+      opacity: 0;
+    }
+  }
+}
+
+@layer base {
+  :root {
+    --background: 222 20% 7%;
+    --foreground: 210 20% 92%;
+
+    --card: 222 18% 10%;
+    --card-foreground: 210 20% 92%;
+
+    --primary: 168 76% 42%;
+    --primary-foreground: 222 20% 7%;
+
+    --secondary: 222 16% 16%;
+    --secondary-foreground: 210 20% 92%;
+
+    --muted: 222 14% 16%;
+    --muted-foreground: 215 12% 60%;
+
+    --accent: 222 16% 18%;
+    --accent-foreground: 210 20% 92%;
+
+    --destructive: 5 78% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 14% 18%;
+    --input: 222 14% 18%;
+    --ring: 168 76% 42%;
+
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
