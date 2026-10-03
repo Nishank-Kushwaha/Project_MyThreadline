@@ -21,6 +21,14 @@ export default function Login() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // login?error=google
+  const urlParams = new URLSearchParams(window.location.search);
+  const googleError = urlParams.get("error");
+
+  if (googleError) {
+    setError("Failed to sign in with Google. Please try again.");
+  }
+
   const handleChange = (e) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }));
 
