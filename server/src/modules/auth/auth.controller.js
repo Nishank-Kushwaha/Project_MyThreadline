@@ -14,7 +14,7 @@ const REFRESH_COOKIE_NAME = "refreshToken";
 const refreshCookieOptions = {
   httpOnly: true,
   secure: nodeEnv === "production",
-  sameSite: "lax",
+  sameSite: nodeEnv === "production" ? "none" : "lax",
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
