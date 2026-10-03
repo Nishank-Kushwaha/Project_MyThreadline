@@ -2,7 +2,9 @@ import { Router } from "express";
 import passport from "passport";
 import * as authController from "./auth.controller.js";
 import authGuard from "../../middlewares/authGuard.js";
+import env from "../../config/env.js";
 
+const { clientUrl } = env;
 const router = Router();
 
 router.post("/register", authController.register);
@@ -27,7 +29,7 @@ router.get(
   "/google/callback",
   passport.authenticate("google", {
     session: false,
-    failureRedirect: "/login?error=google",
+    failureRedirect: `${clientUrl}/login?error=google`,
   }),
   authController.googleCallback,
 );
