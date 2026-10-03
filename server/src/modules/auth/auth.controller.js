@@ -6,6 +6,7 @@ import {
   verifyRefreshToken,
   generateTokenPair,
 } from "../../utils/generateTokens.js";
+import ms from "ms";
 
 const { nodeEnv, clientUrl, jwt } = env;
 
@@ -15,7 +16,7 @@ const refreshCookieOptions = {
   httpOnly: true,
   secure: nodeEnv === "production",
   sameSite: nodeEnv === "production" ? "none" : "lax",
-  maxAge: jwt.refreshExpiresIn,
+  maxAge: ms(jwt.refreshExpiresIn),
 };
 
 async function register(req, res, next) {
