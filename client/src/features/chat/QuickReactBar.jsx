@@ -4,14 +4,16 @@ import { cn } from "@/lib/utils";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-export function QuickReactBar({ isOwn, onPick, onOpenFullPicker }) {
+export function QuickReactBar({ isOwn, mobileTop, onPick, onOpenFullPicker }) {
   return (
     <div
+      style={{ "--bar-top": `${mobileTop ?? 0}px` }}
       className={cn(
-        // Mobile: centered horizontally, at the message's vertical middle
-        "absolute left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2",
-        // Laptop (md+): above the smile button, left or right
-        "md:top-auto md:bottom-full md:mb-2 md:translate-x-0 md:translate-y-0",
+        // Mobile: fixed to the screen, centered horizontally,
+        // vertically centered on the message
+        "fixed left-1/2 top-(--bar-top) z-50 -translate-x-1/2 -translate-y-1/2",
+        // Laptop (md+): same as before
+        "md:absolute md:top-auto md:bottom-full md:mb-2 md:translate-x-0 md:translate-y-0",
         isOwn ? "md:left-auto md:right-0" : "md:left-0 md:right-auto",
         "flex items-center gap-0.5",
         "rounded-full border border-border",
@@ -20,7 +22,6 @@ export function QuickReactBar({ isOwn, onPick, onOpenFullPicker }) {
         "whitespace-nowrap",
       )}
     >
-      {" "}
       {QUICK_REACTIONS.map((emoji) => (
         <button
           key={emoji}
@@ -35,10 +36,9 @@ export function QuickReactBar({ isOwn, onPick, onOpenFullPicker }) {
           )}
           aria-label={`React ${emoji}`}
         >
-          {" "}
-          {emoji}{" "}
+          {emoji}
         </button>
-      ))}{" "}
+      ))}
       <button
         type="button"
         onClick={onOpenFullPicker}
@@ -52,9 +52,8 @@ export function QuickReactBar({ isOwn, onPick, onOpenFullPicker }) {
         )}
         aria-label="More reactions"
       >
-        {" "}
-        <Plus className="h-4 w-4" />{" "}
-      </button>{" "}
+        <Plus className="h-4 w-4" />
+      </button>
     </div>
   );
 }
