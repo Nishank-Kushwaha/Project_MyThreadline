@@ -29,6 +29,19 @@ const messageSchema = new Schema(
         emoji: { type: String, required: true },
       },
     ],
+
+    // Timestamp of the most recent edit
+    editedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Soft delete: preserve the message document and its position
+    // "deletedAt" is what the client checks to render the "This message was deleted" placeholder.
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true },
 );

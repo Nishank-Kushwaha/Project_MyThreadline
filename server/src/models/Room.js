@@ -21,6 +21,7 @@ const roomSchema = new Schema(
       },
     ],
     lastMessage: {
+      messageId: { type: Schema.Types.ObjectId, ref: "Message" },
       text: String,
       sender: { type: Schema.Types.ObjectId, ref: "User" },
       createdAt: Date,

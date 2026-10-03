@@ -43,6 +43,7 @@ export default function Dashboard() {
             ? {
                 ...room,
                 lastMessage: {
+                  messageId: message._id,
                   text: message.text,
                   sender: message.sender._id,
                   createdAt: message.createdAt,
@@ -61,8 +62,36 @@ export default function Dashboard() {
       });
     };
 
+    // An edit/delete only touches the sidebar if it happened to the room's
+    // CURRENT preview message — compare by messageId, not by content.
+    const handlePreviewTextChange =
+      (newText) =>
+      ({ roomId, messageId }) => {
+        setRooms((prev) =>
+          prev.map((room) =>
+            room.id === roomId && room.lastMessage?.messageId === messageId
+              ? { ...room, lastMessage: { ...room.lastMessage, text: newText } }
+              : room,
+          ),
+        );
+      };
+    const handleEdited = ({ roomId, messageId, text }) =>
+      handlePreviewTextChange(text)({ roomId, messageId });
+
+    const handleDeleted = ({ roomId, messageId }) =>
+      handlePreviewTextChange("This message was deleted")({
+        roomId,
+        messageId,
+      });
+
     socket.on("message:new", handleNewMessage);
-    return () => socket.off("message:new", handleNewMessage);
+    socket.on("message:edited", handleEdited);
+    socket.on("message:deleted", handleDeleted);
+    return () => {
+      socket.off("message:new", handleNewMessage);
+      socket.off("message:edited", handleEdited);
+      socket.off("message:deleted", handleDeleted);
+    };
   }, [socket, activeRoomId, user?.id]);
 
   // Someone started a chat with me / added me to a group while I'm online.

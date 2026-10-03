@@ -119,13 +119,6 @@ export function ChatWindow({
 
     socket.emit("message:seen", { roomId: room.id }); // opening the room = seeing what's there
 
-    const handleNewMessage = ({ roomId, message }) => {
-      if (roomId !== room.id) return;
-      setMessages((prev) => [...prev, message]);
-      removeTyping(message.sender._id); // they sent it, so they're no longer "typing"
-      socket.emit("message:seen", { roomId: room.id }); // still open => still seen
-    };
-
     // "everything up to <upTo> that I sent has reached <userId>"
     const receiptHandler =
       (fields) =>
@@ -148,6 +141,12 @@ export function ChatWindow({
         );
       };
 
+    const handleNewMessage = ({ roomId, message }) => {
+      if (roomId !== room.id) return;
+      setMessages((prev) => [...prev, message]);
+      removeTyping(message.sender._id); // they sent it, so they're no longer "typing"
+      socket.emit("message:seen", { roomId: room.id }); // still open => still seen
+    };
     const handleDelivered = receiptHandler(["deliveredTo"]);
     const handleSeenUpdate = receiptHandler(["seenBy", "deliveredTo"]); // seen implies delivered
     // A reaction changed on some message in this room — replace just that
@@ -158,17 +157,41 @@ export function ChatWindow({
         prev.map((m) => (m._id === messageId ? { ...m, reactions } : m)),
       );
     };
+    // Someone edited a message — swap in the new text, mark it edited.
+    const handleEdited = ({ roomId, messageId, text, editedAt }) => {
+      if (roomId !== room.id) return;
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, text, editedAt } : m)),
+      );
+    };
+    // Someone deleted a message — the SERVER already cleared text/reactions;
+    // mirror that here rather than removing it from the list, so the
+    // placeholder ("This message was deleted") renders in its place.
+    const handleDeleted = ({ roomId, messageId, deletedAt }) => {
+      if (roomId !== room.id) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === messageId
+            ? { ...m, text: "", reactions: [], deletedAt }
+            : m,
+        ),
+      );
+    };
 
     socket.on("message:new", handleNewMessage);
     socket.on("message:delivered", handleDelivered);
     socket.on("message:seen-update", handleSeenUpdate);
     socket.on("message:reaction-update", handleReactionUpdate);
+    socket.on("message:edited", handleEdited);
+    socket.on("message:deleted", handleDeleted);
 
     return () => {
       socket.off("message:new", handleNewMessage);
       socket.off("message:delivered", handleDelivered);
       socket.off("message:seen-update", handleSeenUpdate);
       socket.off("message:reaction-update", handleReactionUpdate);
+      socket.off("message:edited", handleEdited);
+      socket.off("message:deleted", handleDeleted);
     };
   }, [socket, room.id, currentUser.id, removeTyping]);
 
@@ -268,6 +291,20 @@ export function ChatWindow({
     );
   };
 
+  const handleEditMessage = (messageId, text) => {
+    if (!socket) return;
+    socket.emit("message:edit", { roomId: room.id, messageId, text }, (ack) => {
+      if (!ack?.success) alert(ack?.message || "Couldn't edit that message.");
+    });
+  };
+
+  const handleDeleteMessage = (messageId) => {
+    if (!socket) return;
+    socket.emit("message:delete", { roomId: room.id, messageId }, (ack) => {
+      if (!ack?.success) alert(ack?.message || "Couldn't delete that message.");
+    });
+  };
+
   const handleScroll = (e) => {
     if (e.currentTarget.scrollTop < 100) loadOlder();
   };
@@ -349,6 +386,8 @@ export function ChatWindow({
               recipientCount={recipientCount}
               currentUserId={currentUser.id}
               onReact={handleReact}
+              onEdit={handleEditMessage}
+              onDelete={handleDeleteMessage}
             />
           ))
         )}
