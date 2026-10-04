@@ -26,6 +26,7 @@ const roomSchema = new Schema(
       text: String,
       sender: { type: Schema.Types.ObjectId, ref: "User" },
       createdAt: Date,
+      system: Schema.Types.Mixed, // only set when the last message is a group event
     },
   },
   { timestamps: true },

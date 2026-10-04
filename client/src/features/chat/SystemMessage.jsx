@@ -1,7 +1,7 @@
 import React from "react";
 
 // Wording depends on who's looking: "You added Bob" vs "Alice added Bob".
-function getSystemText(system, currentUserId) {
+export function getSystemText(system, currentUserId) {
   const { kind, actorId, actorName, targetId, targetName, meta } = system;
 
   const actor = actorId === currentUserId ? "You" : actorName || "Someone";

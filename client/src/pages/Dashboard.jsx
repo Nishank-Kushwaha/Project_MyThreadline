@@ -96,6 +96,7 @@ export default function Dashboard() {
                   text: message.text,
                   sender: null,
                   createdAt: message.createdAt,
+                  system: message.system,
                 },
               }
             : room,
@@ -287,6 +288,7 @@ export default function Dashboard() {
           rooms={rooms}
           activeRoomId={activeRoomId}
           onSelect={handleSelectRoom}
+          currentUserId={user?.id}
         />
 
         <div className="border-t border-border p-3">

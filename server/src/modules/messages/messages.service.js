@@ -70,16 +70,26 @@ async function createSystemMessage({
     const actorName = nameOf(actorId);
     const targetName = targetId ? nameOf(targetId) : null;
 
+    const system = {
+      kind,
+      actorId: actorId.toString(),
+      actorName,
+      targetId: targetId ? targetId.toString() : null,
+      targetName,
+      meta,
+    };
+
     const message = await Message.create({
       roomId,
       type: "system",
       sender: actorId,
       text: buildText(kind, actorName, targetName, meta),
-      system: { kind, actorId, actorName, targetId, targetName, meta },
+      system,
     });
 
     // Sidebar preview + ordering. No unreadCount change, and sender is null
-    // so the sidebar doesn't show a "You:" prefix.
+    // so the sidebar doesn't show a "You:" prefix. `system` lets the client
+    // word the preview per viewer ("Alice added you").
     await Room.updateOne(
       { _id: roomId },
       {
@@ -88,6 +98,7 @@ async function createSystemMessage({
           text: message.text,
           sender: null,
           createdAt: message.createdAt,
+          system,
         },
       },
     );
@@ -98,14 +109,7 @@ async function createSystemMessage({
       type: "system",
       sender: { _id: actorId.toString(), name: actorName },
       text: message.text,
-      system: {
-        kind,
-        actorId: actorId.toString(),
-        actorName,
-        targetId: targetId ? targetId.toString() : null,
-        targetName,
-        meta,
-      },
+      system,
       createdAt: message.createdAt,
     };
   } catch (err) {

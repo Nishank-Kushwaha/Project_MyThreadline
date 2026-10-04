@@ -1,8 +1,9 @@
 import React from "react";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
+import { getSystemText } from "./SystemMessage";
 
-export function RoomList({ rooms, activeRoomId, onSelect }) {
+export function RoomList({ rooms, activeRoomId, onSelect, currentUserId }) {
   if (rooms.length === 0) {
     return (
       <p className="p-4 text-sm text-muted-foreground">
@@ -16,6 +17,11 @@ export function RoomList({ rooms, activeRoomId, onSelect }) {
       {rooms.map((room) => {
         const avatar = resolveAvatarUrl(room.avatarUrl);
         const isOnline = room.type === "private" && room.status === "online";
+        const lastMessage = room.lastMessage;
+        const preview =
+          (lastMessage?.system &&
+            getSystemText(lastMessage.system, currentUserId)) ||
+          lastMessage?.text;
 
         return (
           <li key={room.id}>
@@ -53,7 +59,7 @@ export function RoomList({ rooms, activeRoomId, onSelect }) {
                   )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
-                  {room.lastMessage?.text ||
+                  {preview ||
                     (room.type === "group"
                       ? `${room.memberCount} members`
                       : "Say hello")}
