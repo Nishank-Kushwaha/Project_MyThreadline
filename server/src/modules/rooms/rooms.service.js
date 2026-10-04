@@ -103,6 +103,7 @@ async function createGroupRoom(userId, name, memberIds = []) {
   const room = await Room.create({
     type: "group",
     name: name.trim(),
+    createdBy: userId,
     members: uniqueMemberIds.map((id) => ({
       userId: id,
       isAdmin: id === userId,
@@ -202,6 +203,11 @@ async function demoteAdmin(roomId, requesterId, targetId) {
     throw new ApiError(400, "You can't remove your own admin role");
   }
 
+  // The person who created the group can never be dismissed.
+  if (room.createdBy?.toString() === targetId) {
+    throw new ApiError(403, "The group creator can't be dismissed as admin");
+  }
+
   const target = room.members.find((m) => m.userId.toString() === targetId);
 
   if (!target) {
@@ -298,12 +304,15 @@ async function getRoomMembers(roomId, userId) {
     throw new ApiError(403, "You are not a member of this room");
   }
 
+  const creatorId = room.createdBy?.toString();
+
   return room.members.map((m) => ({
     id: m.userId._id,
     name: m.userId.name,
     avatarUrl: m.userId.avatarUrl,
     status: m.userId.status,
     isAdmin: m.isAdmin,
+    isCreator: m.userId._id.toString() === creatorId,
   }));
 }
 

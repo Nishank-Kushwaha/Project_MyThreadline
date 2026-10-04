@@ -609,7 +609,8 @@ export function MembersPanel({
                   // Admins can promote/remove regular members, and dismiss
                   // other admins. Never themselves.
                   const canManage = isAdmin && !member.isAdmin && !isMe;
-                  const canDemote = isAdmin && member.isAdmin && !isMe;
+                  const canDemote =
+                    isAdmin && member.isAdmin && !isMe && !member.isCreator;
 
                   return (
                     <li
@@ -635,7 +636,7 @@ export function MembersPanel({
                         {member.isAdmin ? (
                           <p className="flex items-center gap-1 text-xs text-amber-500">
                             <Crown className="h-3 w-3" aria-hidden="true" />
-                            Admin
+                            {member.isCreator ? "Creator" : "Admin"}
                           </p>
                         ) : (
                           <p className="text-xs text-muted-foreground">
