@@ -84,13 +84,41 @@ export default function Dashboard() {
         messageId,
       });
 
+    // Group events update the preview and ordering, but never the unread badge.
+    const handleSystemMessage = ({ roomId, message }) => {
+      setRooms((prev) => {
+        const updated = prev.map((room) =>
+          room.id === roomId
+            ? {
+                ...room,
+                lastMessage: {
+                  messageId: message._id,
+                  text: message.text,
+                  sender: null,
+                  createdAt: message.createdAt,
+                },
+              }
+            : room,
+        );
+
+        const index = updated.findIndex((room) => room.id === roomId);
+        if (index > 0) {
+          const [moved] = updated.splice(index, 1);
+          updated.unshift(moved);
+        }
+        return updated;
+      });
+    };
+
     socket.on("message:new", handleNewMessage);
     socket.on("message:edited", handleEdited);
     socket.on("message:deleted", handleDeleted);
+    socket.on("message:system", handleSystemMessage);
     return () => {
       socket.off("message:new", handleNewMessage);
       socket.off("message:edited", handleEdited);
       socket.off("message:deleted", handleDeleted);
+      socket.off("message:system", handleSystemMessage);
     };
   }, [socket, activeRoomId, user?.id]);
 

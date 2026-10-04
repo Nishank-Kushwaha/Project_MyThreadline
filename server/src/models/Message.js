@@ -13,6 +13,34 @@ const messageSchema = new Schema(
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true },
     text: { type: String, required: true, trim: true },
 
+    // "user" = a normal chat message, "system" = an event like "Carol left".
+    // For system messages, `sender` is the person who did the action.
+    type: { type: String, enum: ["user", "system"], default: "user" },
+
+    // Only set when type is "system". Names are snapshotted so history still
+    // reads correctly even if someone later renames themselves.
+    system: {
+      kind: {
+        type: String,
+        enum: [
+          "group-created",
+          "name-changed",
+          "avatar-changed",
+          "avatar-removed",
+          "member-added",
+          "member-removed",
+          "member-promoted",
+          "member-left",
+          "member-auto-promoted",
+        ],
+      },
+      actorId: { type: Schema.Types.ObjectId, ref: "User" },
+      actorName: String,
+      targetId: { type: Schema.Types.ObjectId, ref: "User" },
+      targetName: String,
+      meta: { oldName: String, newName: String },
+    },
+
     // Receipts are tracked PER RECIPIENT so they work for groups too.
     // The client derives the tick state:
     //   seenBy.length      >= recipients  -> seen      (✓✓ highlighted)

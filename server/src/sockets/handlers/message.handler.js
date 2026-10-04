@@ -89,6 +89,7 @@ function registerMessageHandlers(io, socket) {
       const result = await Message.updateMany(
         {
           roomId,
+          type: { $ne: "system" },
           sender: { $ne: socket.userId },
           seenBy: { $ne: socket.userId },
         },
@@ -125,6 +126,7 @@ function registerMessageHandlers(io, socket) {
       const message = await Message.findOne({
         _id: messageId,
         roomId,
+        type: { $ne: "system" },
       });
 
       if (!message) {
@@ -185,7 +187,12 @@ function registerMessageHandlers(io, socket) {
       });
       if (!room) throw new ApiError(403, "You are not a member of this room");
 
-      const message = await Message.findOne({ _id: messageId, roomId });
+      const message = await Message.findOne({
+        _id: messageId,
+        roomId,
+        type: { $ne: "system" },
+      });
+
       if (!message) throw new ApiError(404, "Message not found");
       if (message.sender.toString() !== socket.userId) {
         throw new ApiError(403, "You can only edit your own messages");
@@ -232,7 +239,11 @@ function registerMessageHandlers(io, socket) {
         throw new ApiError(403, "You are not a member of this room");
       }
 
-      const message = await Message.findOne({ _id: messageId, roomId });
+      const message = await Message.findOne({
+        _id: messageId,
+        roomId,
+        type: { $ne: "system" },
+      });
 
       if (!message) {
         throw new ApiError(404, "Message not found");

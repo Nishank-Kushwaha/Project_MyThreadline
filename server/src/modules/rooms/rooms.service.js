@@ -282,7 +282,8 @@ async function getRoomMembers(roomId, userId) {
 async function updateGroupName(roomId, requesterId, name) {
   const MAX_GROUP_NAME_LENGTH = 50;
 
-  await assertGroupAdmin(roomId, requesterId);
+  const group = await assertGroupAdmin(roomId, requesterId);
+  const oldName = group.name;
 
   const trimmed = typeof name === "string" ? name.trim() : "";
 
@@ -294,13 +295,26 @@ async function updateGroupName(roomId, requesterId, name) {
     );
   }
 
+  // Same name as before: nothing to update, nothing to announce.
+  if (trimmed === oldName) {
+    return {
+      room: await populateRoom(roomId, requesterId),
+      oldName,
+      changed: false,
+    };
+  }
+
   await Room.updateOne(
     { _id: roomId },
     { name: trimmed },
     { runValidators: true },
   );
 
-  return populateRoom(roomId, requesterId);
+  return {
+    room: await populateRoom(roomId, requesterId),
+    oldName,
+    changed: true,
+  };
 }
 
 async function updateGroupAvatar(roomId, requesterId, file) {
@@ -355,7 +369,7 @@ async function removeGroupAvatar(roomId, requesterId) {
 
   // Nothing to remove, treat as success so the call is idempotent.
   if (!room.groupAvatarUrl && !room.groupAvatarPublicId) {
-    return populateRoom(roomId, requesterId);
+    return { room: await populateRoom(roomId, requesterId), changed: false };
   }
 
   if (room.groupAvatarPublicId) {
@@ -379,7 +393,7 @@ async function removeGroupAvatar(roomId, requesterId) {
     { groupAvatarUrl: "", groupAvatarPublicId: "" },
   );
 
-  return populateRoom(roomId, requesterId);
+  return { room: await populateRoom(roomId, requesterId), changed: true };
 }
 
 export {

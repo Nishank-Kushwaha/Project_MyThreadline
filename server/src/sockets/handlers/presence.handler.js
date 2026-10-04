@@ -12,6 +12,7 @@ async function markPendingAsDelivered(socket, roomIds) {
 
   const filter = {
     roomId: { $in: roomIds },
+    type: { $ne: "system" },
     sender: { $ne: socket.userId },
     deliveredTo: { $ne: socket.userId },
   };

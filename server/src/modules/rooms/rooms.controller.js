@@ -1,5 +1,6 @@
 import * as roomsService from "./rooms.service.js";
 import ApiError from "../../utils/ApiError.js";
+import { createSystemMessage } from "../messages/messages.service.js";
 
 // After a room is created over REST, pull every OTHER member's live sockets
 // into it and tell their UI about it.
@@ -20,6 +21,19 @@ async function notifyMembers(req, roomId) {
   }
 }
 
+// Sends a system message to everyone in the room, optionally skipping one user
+// (someone who just left/was removed and shouldn't see their own exit line).
+function emitSystemMessage(io, roomId, message, exceptUserId = null) {
+  if (!io || !message) return;
+
+  const target = io.to(roomId);
+
+  (exceptUserId ? target.except(`user:${exceptUserId}`) : target).emit(
+    "message:system",
+    { roomId, message },
+  );
+}
+
 async function createRoom(req, res, next) {
   try {
     const { type, memberId, name, memberIds } = req.body;
@@ -34,6 +48,16 @@ async function createRoom(req, res, next) {
       room = await roomsService.createPrivateRoom(req.userId, memberId);
     } else if (type === "group") {
       room = await roomsService.createGroupRoom(req.userId, name, memberIds);
+
+      await createSystemMessage({
+        roomId: room.id.toString(),
+        kind: "group-created",
+        actorId: req.userId,
+        meta: { newName: room.name },
+      });
+
+      // Re-read so the response and room:new include the new lastMessage.
+      room = await roomsService.getRoomForUser(room.id, req.userId);
     } else {
       throw new ApiError(400, "type must be 'private' or 'group'");
     }
@@ -81,6 +105,13 @@ async function addMember(req, res, next) {
 
     const roomId = room._id.toString();
 
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "member-added",
+      actorId: req.userId,
+      targetId: memberId,
+    });
+
     const io = req.app.get("io");
 
     if (io) {
@@ -99,6 +130,9 @@ async function addMember(req, res, next) {
       io.to(roomId)
         .except(`user:${memberId}`)
         .emit("room:member-added", { roomId, memberId });
+
+      // Everyone, including the new member (already joined above).
+      emitSystemMessage(io, roomId, systemMessage);
     }
 
     const members = await roomsService.getRoomMembers(roomId, req.userId);
@@ -124,6 +158,13 @@ async function removeMember(req, res, next) {
 
     const roomId = room._id.toString();
 
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "member-removed",
+      actorId: req.userId,
+      targetId: memberId,
+    });
+
     const io = req.app.get("io");
 
     if (io) {
@@ -131,6 +172,9 @@ async function removeMember(req, res, next) {
       io.to(roomId)
         .except(`user:${memberId}`)
         .emit("room:member-removed", { roomId, memberId });
+
+      // Everyone, including the removed member (who is still in the room until the next line).
+      emitSystemMessage(io, roomId, systemMessage, memberId);
 
       // Tell the removed member that they were removed.
       io.to(`user:${memberId}`).emit("room:removed", {
@@ -168,6 +212,13 @@ async function makeAdmin(req, res, next) {
 
     const roomId = room._id.toString();
 
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "member-promoted",
+      actorId: req.userId,
+      targetId: memberId,
+    });
+
     const io = req.app.get("io");
 
     if (io) {
@@ -177,6 +228,9 @@ async function makeAdmin(req, res, next) {
         roomId,
         memberId,
       });
+
+      // Everyone, including the promoted member.
+      emitSystemMessage(io, roomId, systemMessage);
     }
 
     const members = await roomsService.getRoomMembers(roomId, req.userId);
@@ -197,6 +251,23 @@ async function leaveRoom(req, res, next) {
       req.userId,
     );
 
+    const leftMessage = deleted
+      ? null
+      : await createSystemMessage({
+          roomId,
+          kind: "member-left",
+          actorId: req.userId,
+        });
+
+    const promotedMessage = promotedId
+      ? await createSystemMessage({
+          roomId,
+          kind: "member-auto-promoted",
+          actorId: req.userId,
+          targetId: promotedId,
+        })
+      : null;
+
     const io = req.app.get("io");
 
     if (io) {
@@ -212,6 +283,10 @@ async function leaveRoom(req, res, next) {
             .except(`user:${req.userId}`)
             .emit("room:member-promoted", { roomId, memberId: promotedId });
         }
+
+        // Everyone, including the leaver (who is still in the room until the next line).
+        emitSystemMessage(io, roomId, leftMessage, req.userId);
+        emitSystemMessage(io, roomId, promotedMessage, req.userId);
       }
 
       // Same event as being removed by an admin: the Dashboard drops the room
@@ -238,7 +313,7 @@ async function updateGroupName(req, res, next) {
       throw new ApiError(400, "New group name is required");
     }
 
-    const room = await roomsService.updateGroupName(
+    const { room, oldName, changed } = await roomsService.updateGroupName(
       req.params.roomId,
       req.userId,
       name,
@@ -246,15 +321,23 @@ async function updateGroupName(req, res, next) {
 
     const roomId = room.id.toString();
 
-    const io = req.app.get("io");
-
-    if (io) {
-      // Everyone in the room (the requester included) sees the new name live,
-      // same approach as room:member-promoted.
-      io.to(roomId).emit("room:name-updated", {
+    if (changed) {
+      const systemMessage = await createSystemMessage({
         roomId,
-        name: room.name,
+        kind: "name-changed",
+        actorId: req.userId,
+        meta: { oldName, newName: room.name },
       });
+
+      const io = req.app.get("io");
+
+      if (io) {
+        // Everyone in the room (the requester included) sees the new name live.
+        io.to(roomId).emit("room:name-updated", { roomId, name: room.name });
+
+        // Everyone, including the requester.
+        emitSystemMessage(io, roomId, systemMessage);
+      }
     }
 
     res.status(200).json({
@@ -276,6 +359,12 @@ async function updateGroupAvatar(req, res, next) {
 
     const roomId = room.id.toString();
 
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "avatar-changed",
+      actorId: req.userId,
+    });
+
     const io = req.app.get("io");
 
     if (io) {
@@ -284,6 +373,9 @@ async function updateGroupAvatar(req, res, next) {
         roomId,
         avatarUrl: room.avatarUrl,
       });
+
+      // Everyone, including the requester.
+      emitSystemMessage(io, roomId, systemMessage);
     }
 
     res.status(200).json({
@@ -297,24 +389,33 @@ async function updateGroupAvatar(req, res, next) {
 
 async function removeGroupAvatar(req, res, next) {
   try {
-    const room = await roomsService.removeGroupAvatar(
+    const { room, changed } = await roomsService.removeGroupAvatar(
       req.params.roomId,
       req.userId,
     );
 
     const roomId = room.id.toString();
 
-    const io = req.app.get("io");
-
-    if (io) {
-      // Same event as an upload; avatarUrl is null once the photo is gone,
-      // so the UI falls back to the group's initial.
-      io.to(roomId).emit("room:avatar-updated", {
+    if (changed) {
+      const systemMessage = await createSystemMessage({
         roomId,
-        avatarUrl: room.avatarUrl,
+        kind: "avatar-removed",
+        actorId: req.userId,
       });
-    }
 
+      const io = req.app.get("io");
+
+      if (io) {
+        // Everyone in the room (the requester included) sees the new photo live.
+        io.to(roomId).emit("room:avatar-updated", {
+          roomId,
+          avatarUrl: room.avatarUrl,
+        });
+
+        // Everyone, including the requester.
+        emitSystemMessage(io, roomId, systemMessage);
+      }
+    }
     res.status(200).json({
       success: true,
       room,

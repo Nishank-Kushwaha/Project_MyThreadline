@@ -11,6 +11,7 @@ import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { formatLastSeen, resolveAvatarUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
+import { SystemMessage } from "./SystemMessage";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence
 const TYPING_REFRESH_MS = 2500; // while I keep typing, re-announce this often
@@ -177,6 +178,14 @@ export function ChatWindow({
         ),
       );
     };
+    // Group events ("Carol left"). The id check guards against the same event
+    // arriving both live and in a history fetch.
+    const handleSystemMessage = ({ roomId, message }) => {
+      if (roomId !== room.id) return;
+      setMessages((prev) =>
+        prev.some((m) => m._id === message._id) ? prev : [...prev, message],
+      );
+    };
 
     socket.on("message:new", handleNewMessage);
     socket.on("message:delivered", handleDelivered);
@@ -184,6 +193,7 @@ export function ChatWindow({
     socket.on("message:reaction-update", handleReactionUpdate);
     socket.on("message:edited", handleEdited);
     socket.on("message:deleted", handleDeleted);
+    socket.on("message:system", handleSystemMessage);
 
     return () => {
       socket.off("message:new", handleNewMessage);
@@ -192,6 +202,7 @@ export function ChatWindow({
       socket.off("message:reaction-update", handleReactionUpdate);
       socket.off("message:edited", handleEdited);
       socket.off("message:deleted", handleDeleted);
+      socket.off("message:system", handleSystemMessage);
     };
   }, [socket, room.id, currentUser.id, removeTyping]);
 
@@ -377,19 +388,27 @@ export function ChatWindow({
             No messages yet — say hello.
           </p>
         ) : (
-          messages.map((m) => (
-            <MessageBubble
-              key={m._id}
-              message={m}
-              isOwn={m.sender._id === currentUser.id}
-              isGroup={room.type === "group"}
-              recipientCount={recipientCount}
-              currentUserId={currentUser.id}
-              onReact={handleReact}
-              onEdit={handleEditMessage}
-              onDelete={handleDeleteMessage}
-            />
-          ))
+          messages.map((m) =>
+            m.type === "system" ? (
+              <SystemMessage
+                key={m._id}
+                message={m}
+                currentUserId={currentUser.id}
+              />
+            ) : (
+              <MessageBubble
+                key={m._id}
+                message={m}
+                isOwn={m.sender._id === currentUser.id}
+                isGroup={room.type === "group"}
+                recipientCount={recipientCount}
+                currentUserId={currentUser.id}
+                onReact={handleReact}
+                onEdit={handleEditMessage}
+                onDelete={handleDeleteMessage}
+              />
+            ),
+          )
         )}
         <div ref={bottomRef} />
       </div>
