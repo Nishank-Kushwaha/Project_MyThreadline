@@ -19,6 +19,7 @@ import {
   Loader2,
   LogOut,
   ShieldOff,
+  ArrowRightLeft,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   removeRoomMemberRequest,
   makeRoomAdminRequest,
   demoteRoomAdminRequest,
+  transferCreatorRequest,
   updateGroupNameRequest,
   updateGroupAvatarRequest,
   removeGroupAvatarRequest,
@@ -95,6 +97,10 @@ export function MembersPanel({
   const isAdmin =
     members.find((m) => m.id === currentUserId)?.isAdmin ?? room.isAdmin;
 
+  // Creator status comes from the freshly loaded member list when available.
+  const isCreator =
+    members.find((m) => m.id === currentUserId)?.isCreator ?? false;
+
   const memberCount = isLoading ? room.memberCount : members.length;
 
   /* ----------------------------- loading ----------------------------- */
@@ -135,12 +141,14 @@ export function MembersPanel({
     socket.on("room:member-removed", refresh);
     socket.on("room:member-promoted", refresh);
     socket.on("room:member-demoted", refresh);
+    socket.on("room:creator-transferred", refresh);
 
     return () => {
       socket.off("room:member-added", refresh);
       socket.off("room:member-removed", refresh);
       socket.off("room:member-promoted", refresh);
       socket.off("room:member-demoted", refresh);
+      socket.off("room:creator-transferred", refresh);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, open, room.id]);
@@ -286,6 +294,16 @@ export function MembersPanel({
     }
   };
 
+  const transferCreator = async (member) => {
+    setError("");
+    try {
+      const { data } = await transferCreatorRequest(room.id, member.id);
+      setMembers(data.members);
+    } catch (err) {
+      setError(apiMessage(err, "Couldn't transfer the creator role."));
+    }
+  };
+
   const leaveGroup = async () => {
     setError("");
     try {
@@ -332,6 +350,16 @@ export function MembersPanel({
       confirmLabel: "Dismiss as admin",
       destructive: true,
       onConfirm: () => demoteMember(member),
+    });
+
+  const askTransferCreator = (member) =>
+    setConfirm({
+      title: `Make ${member.name} the group creator?`,
+      message:
+        "They'll become the creator and can't be dismissed as admin by other admins. You'll stay an admin, but another admin will be able to dismiss you.",
+      confirmLabel: "Transfer creator role",
+      destructive: true,
+      onConfirm: () => transferCreator(member),
     });
 
   const askLeaveGroup = () => {
@@ -670,6 +698,17 @@ export function MembersPanel({
 
                       {canDemote && (
                         <div className="flex shrink-0 items-center gap-1">
+                          {isCreator && (
+                            <button
+                              type="button"
+                              onClick={() => askTransferCreator(member)}
+                              aria-label={`Make ${member.name} the group creator`}
+                              title="Transfer creator role"
+                              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+                            >
+                              <ArrowRightLeft className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => askDemoteMember(member)}

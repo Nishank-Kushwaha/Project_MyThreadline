@@ -16,6 +16,7 @@ router.post("/:roomId/members", roomsController.addMember);
 router.delete("/:roomId/members/:memberId", roomsController.removeMember);
 router.post("/:roomId/admins", roomsController.makeAdmin);
 router.delete("/:roomId/admins/:memberId", roomsController.demoteAdmin);
+router.post("/:roomId/creator", roomsController.transferCreator);
 router.post("/:roomId/leave", roomsController.leaveRoom);
 router.patch("/:roomId/name", roomsController.updateGroupName);
 router.patch(

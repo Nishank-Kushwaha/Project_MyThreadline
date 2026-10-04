@@ -227,6 +227,34 @@ async function demoteAdmin(roomId, requesterId, targetId) {
   return room;
 }
 
+async function transferCreator(roomId, requesterId, targetId) {
+  const room = await assertGroupAdmin(roomId, requesterId);
+
+  if (room.createdBy?.toString() !== requesterId) {
+    throw new ApiError(403, "Only the group creator can transfer that role");
+  }
+
+  if (targetId === requesterId) {
+    throw new ApiError(400, "You are already the group creator");
+  }
+
+  const target = room.members.find((m) => m.userId.toString() === targetId);
+
+  if (!target) {
+    throw new ApiError(404, "That person isn't in this group");
+  }
+
+  if (!target.isAdmin) {
+    throw new ApiError(409, "Make that person an admin first");
+  }
+
+  room.createdBy = targetId;
+
+  await room.save();
+
+  return room;
+}
+
 async function leaveRoom(roomId, userId) {
   const room = await assertMembership(roomId, userId);
 
@@ -258,21 +286,40 @@ async function leaveRoom(roomId, userId) {
       }
     }
 
-    return { roomId: room._id.toString(), promotedId: null, deleted: true };
+    return {
+      roomId: room._id.toString(),
+      promotedId: null,
+      newCreatorId: null,
+      deleted: true,
+    };
   }
 
-  // Never leave a group without an admin: promote whoever joined earliest.
   // Members with no joinedAt predate the field, so they count as the oldest;
   // the sort is stable, so ties keep their order in the array.
+  const byJoinedAt = (a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0);
+
+  // Never leave a group without an admin: promote whoever joined earliest.
   let promotedId = null;
 
   if (leaving.isAdmin && !remaining.some((m) => m.isAdmin)) {
-    const [longestStanding] = [...remaining].sort(
-      (a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0),
-    );
+    const [longestStanding] = [...remaining].sort(byJoinedAt);
 
     longestStanding.isAdmin = true;
     promotedId = longestStanding.userId.toString();
+  }
+
+  // The creator is leaving: pass the role to the longest-standing admin so
+  // the protection always belongs to someone who is still here. The creator
+  // is always an admin, so after the step above an admin is guaranteed.
+  let newCreatorId = null;
+
+  if (room.createdBy?.toString() === userId) {
+    const [nextCreator] = remaining.filter((m) => m.isAdmin).sort(byJoinedAt);
+
+    if (nextCreator) {
+      room.createdBy = nextCreator.userId;
+      newCreatorId = nextCreator.userId.toString();
+    }
   }
 
   room.members = remaining;
@@ -280,7 +327,12 @@ async function leaveRoom(roomId, userId) {
 
   await room.save();
 
-  return { roomId: room._id.toString(), promotedId, deleted: false };
+  return {
+    roomId: room._id.toString(),
+    promotedId,
+    newCreatorId,
+    deleted: false,
+  };
 }
 
 async function getRoomForUser(roomId, userId) {
@@ -443,6 +495,7 @@ export {
   removeRoomMember,
   promoteToAdmin,
   demoteAdmin,
+  transferCreator,
   leaveRoom,
   getRoomForUser,
   getRoomMemberIds,

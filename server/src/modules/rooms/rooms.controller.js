@@ -283,12 +283,53 @@ async function demoteAdmin(req, res, next) {
   }
 }
 
-async function leaveRoom(req, res, next) {
+async function transferCreator(req, res, next) {
   try {
-    const { roomId, promotedId, deleted } = await roomsService.leaveRoom(
+    const { memberId } = req.body;
+
+    if (!memberId) {
+      throw new ApiError(400, "memberId is required");
+    }
+
+    const room = await roomsService.transferCreator(
       req.params.roomId,
       req.userId,
+      memberId,
     );
+
+    const roomId = room._id.toString();
+
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "creator-transferred",
+      actorId: req.userId,
+      targetId: memberId,
+    });
+
+    const io = req.app.get("io");
+
+    if (io) {
+      // Open member panels refresh so the "Creator" label moves live.
+      io.to(roomId).emit("room:creator-transferred", { roomId, memberId });
+
+      emitSystemMessage(io, roomId, systemMessage);
+    }
+
+    const members = await roomsService.getRoomMembers(roomId, req.userId);
+
+    res.status(200).json({
+      success: true,
+      members,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function leaveRoom(req, res, next) {
+  try {
+    const { roomId, promotedId, newCreatorId, deleted } =
+      await roomsService.leaveRoom(req.params.roomId, req.userId);
 
     const leftMessage = deleted
       ? null
@@ -304,6 +345,15 @@ async function leaveRoom(req, res, next) {
           kind: "member-auto-promoted",
           actorId: req.userId,
           targetId: promotedId,
+        })
+      : null;
+
+    const creatorMessage = newCreatorId
+      ? await createSystemMessage({
+          roomId,
+          kind: "creator-auto-transferred",
+          actorId: req.userId,
+          targetId: newCreatorId,
         })
       : null;
 
@@ -323,9 +373,20 @@ async function leaveRoom(req, res, next) {
             .emit("room:member-promoted", { roomId, memberId: promotedId });
         }
 
+        // The only creator left, so the creator role was transferred automatically.
+        if (newCreatorId) {
+          io.to(roomId)
+            .except(`user:${req.userId}`)
+            .emit("room:creator-transferred", {
+              roomId,
+              memberId: newCreatorId,
+            });
+        }
+
         // Everyone, including the leaver (who is still in the room until the next line).
         emitSystemMessage(io, roomId, leftMessage, req.userId);
         emitSystemMessage(io, roomId, promotedMessage, req.userId);
+        emitSystemMessage(io, roomId, creatorMessage, req.userId);
       }
 
       // Same event as being removed by an admin: the Dashboard drops the room
@@ -485,6 +546,7 @@ export {
   removeMember,
   makeAdmin,
   demoteAdmin,
+  transferCreator,
   leaveRoom,
   updateGroupName,
   updateGroupAvatar,

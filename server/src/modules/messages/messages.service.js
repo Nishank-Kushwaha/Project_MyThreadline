@@ -41,6 +41,10 @@ function buildText(kind, actorName, targetName, meta) {
       return `${actorName} made ${targetName} an admin`;
     case "member-demoted":
       return `${actorName} dismissed ${targetName} as an admin`;
+    case "creator-transferred":
+      return `${actorName} made ${targetName} the group creator`;
+    case "creator-auto-transferred":
+      return `${targetName} is now the group creator`;
     case "member-left":
       return `${actorName} left`;
     case "member-auto-promoted":

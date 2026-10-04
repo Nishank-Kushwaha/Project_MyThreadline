@@ -31,6 +31,8 @@ const messageSchema = new Schema(
           "member-removed",
           "member-promoted",
           "member-demoted",
+          "creator-transferred",
+          "creator-auto-transferred",
           "member-left",
           "member-auto-promoted",
         ],

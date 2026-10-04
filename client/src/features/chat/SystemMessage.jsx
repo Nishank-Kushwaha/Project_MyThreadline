@@ -25,6 +25,12 @@ export function getSystemText(system, currentUserId) {
       return `${actor} made ${target} an admin`;
     case "member-demoted":
       return `${actor} dismissed ${target} as an admin`;
+    case "creator-transferred":
+      return `${actor} made ${target} the group creator`;
+    case "creator-auto-transferred":
+      return targetIsMe
+        ? "You're now the group creator"
+        : `${target} is now the group creator`;
     case "member-left":
       return `${actor} left`;
     case "member-auto-promoted":
