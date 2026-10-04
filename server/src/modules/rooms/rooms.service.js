@@ -1,4 +1,5 @@
 import Room from "../../models/Room.js";
+import Message from "../../models/Message.js";
 import ApiError from "../../utils/ApiError.js";
 import { uploadAvatarImage, deleteImage } from "../../utils/imageStorage.js";
 
@@ -97,12 +98,15 @@ async function createGroupRoom(userId, name, memberIds = []) {
   if (uniqueMemberIds.length < 3)
     throw new ApiError(400, "A group needs at least 2 other members");
 
+  const joinedAt = new Date();
+
   const room = await Room.create({
     type: "group",
     name: name.trim(),
     members: uniqueMemberIds.map((id) => ({
       userId: id,
       isAdmin: id === userId,
+      joinedAt,
     })),
   });
 
@@ -128,9 +132,12 @@ async function addRoomMember(roomId, requesterId, newMemberId) {
     throw new ApiError(409, "That person is already in the group");
   }
 
+  const joinedAt = new Date();
+
   room.members.push({
     userId: newMemberId,
     isAdmin: false,
+    joinedAt,
   });
 
   await room.save();
@@ -184,6 +191,62 @@ async function promoteToAdmin(roomId, requesterId, targetId) {
   await room.save();
 
   return room;
+}
+
+async function leaveRoom(roomId, userId) {
+  const room = await assertMembership(roomId, userId);
+
+  if (room.type !== "group") {
+    throw new ApiError(400, "You can only leave group chats");
+  }
+
+  const leaving = room.members.find((m) => m.userId.toString() === userId);
+  const remaining = room.members.filter((m) => m.userId.toString() !== userId);
+
+  // Last person out: nobody is left to see this room, so delete it.
+  if (remaining.length === 0) {
+    // Messages first: if this fails the room still exists and the user can
+    // simply retry, instead of leaving orphaned messages behind a deleted room.
+    await Message.deleteMany({ roomId });
+    await Room.deleteOne({ _id: roomId });
+
+    // The group photo lives on Cloudinary, so clean it up too. The room is
+    // already gone, so a failure here is logged but doesn't fail the request.
+    if (room.groupAvatarPublicId) {
+      try {
+        await deleteImage(room.groupAvatarPublicId);
+      } catch (err) {
+        console.error(
+          "[cloudinary] couldn't delete group avatar of deleted room",
+          room.groupAvatarPublicId,
+          err.message,
+        );
+      }
+    }
+
+    return { roomId: room._id.toString(), promotedId: null, deleted: true };
+  }
+
+  // Never leave a group without an admin: promote whoever joined earliest.
+  // Members with no joinedAt predate the field, so they count as the oldest;
+  // the sort is stable, so ties keep their order in the array.
+  let promotedId = null;
+
+  if (leaving.isAdmin && !remaining.some((m) => m.isAdmin)) {
+    const [longestStanding] = [...remaining].sort(
+      (a, b) => (a.joinedAt ?? 0) - (b.joinedAt ?? 0),
+    );
+
+    longestStanding.isAdmin = true;
+    promotedId = longestStanding.userId.toString();
+  }
+
+  room.members = remaining;
+  room.markModified("members");
+
+  await room.save();
+
+  return { roomId: room._id.toString(), promotedId, deleted: false };
 }
 
 async function getRoomForUser(roomId, userId) {
@@ -328,6 +391,7 @@ export {
   addRoomMember,
   removeRoomMember,
   promoteToAdmin,
+  leaveRoom,
   getRoomForUser,
   getRoomMemberIds,
   getRoomMembers,

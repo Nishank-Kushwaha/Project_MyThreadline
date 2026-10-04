@@ -12,6 +12,7 @@ const roomSchema = new Schema(
       {
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
         isAdmin: { type: Boolean, default: false },
+        joinedAt: { type: Date }, // set explicitly when someone joins a group
         unreadCount: { type: Number, default: 0 },
         lastReadMessageId: {
           type: Schema.Types.ObjectId,

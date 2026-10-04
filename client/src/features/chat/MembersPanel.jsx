@@ -17,6 +17,7 @@ import {
   Sparkles,
   Search,
   Loader2,
+  LogOut,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   updateGroupNameRequest,
   updateGroupAvatarRequest,
   removeGroupAvatarRequest,
+  leaveRoomRequest,
 } from "@/api/roomsApi";
 
 import { listUsersRequest } from "@/api/usersApi";
@@ -269,6 +271,17 @@ export function MembersPanel({
     }
   };
 
+  const leaveGroup = async () => {
+    setError("");
+    try {
+      await leaveRoomRequest(room.id);
+      // Nothing else to do here: the server emits "room:removed" to this user
+      // and the Dashboard removes the room and closes this panel.
+    } catch (err) {
+      setError(apiMessage(err, "Couldn't leave the group."));
+    }
+  };
+
   const askRemovePhoto = () =>
     setConfirm({
       title: "Remove group photo?",
@@ -295,6 +308,30 @@ export function MembersPanel({
       confirmLabel: "Make admin",
       onConfirm: () => promoteMember(member),
     });
+
+  const askLeaveGroup = () => {
+    const isLastMember = members.length === 1;
+    const isOnlyAdmin =
+      isAdmin && !members.some((m) => m.isAdmin && m.id !== currentUserId);
+
+    let message =
+      "You'll no longer see messages in this group. Someone will need to add you back if you want to rejoin.";
+
+    if (isLastMember) {
+      message = "You're the last member, so this group will be deleted.";
+    } else if (isOnlyAdmin) {
+      message =
+        "You're the only admin, so the longest-standing member will become admin. You'll no longer see messages in this group.";
+    }
+
+    setConfirm({
+      title: "Leave this group?",
+      message,
+      confirmLabel: "Leave group",
+      destructive: true,
+      onConfirm: leaveGroup,
+    });
+  };
 
   /* ----------------------------- derived ----------------------------- */
 
@@ -614,6 +651,20 @@ export function MembersPanel({
                 )}
               </ul>
             )}
+          </section>
+
+          {/* Leave group: every member, admin or not */}
+          <section className="border-t border-border p-4">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 w-full border border-input text-destructive hover:text-destructive"
+              disabled={isLoading}
+              onClick={askLeaveGroup}
+            >
+              <LogOut className="mr-1.5 h-4 w-4" />
+              Leave group
+            </Button>
           </section>
         </div>
       </div>

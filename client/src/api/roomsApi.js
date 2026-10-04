@@ -19,6 +19,8 @@ export const removeRoomMemberRequest = (roomId, memberId) =>
 export const makeRoomAdminRequest = (roomId, memberId) =>
   api.post(`/rooms/${roomId}/admins`, { memberId });
 
+export const leaveRoomRequest = (roomId) => api.post(`/rooms/${roomId}/leave`);
+
 export const updateGroupNameRequest = (roomId, name) =>
   api.patch(`/rooms/${roomId}/name`, { name });
 

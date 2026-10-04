@@ -190,6 +190,46 @@ async function makeAdmin(req, res, next) {
   }
 }
 
+async function leaveRoom(req, res, next) {
+  try {
+    const { roomId, promotedId, deleted } = await roomsService.leaveRoom(
+      req.params.roomId,
+      req.userId,
+    );
+
+    const io = req.app.get("io");
+
+    if (io) {
+      if (!deleted) {
+        // Tell the people staying in the room first.
+        io.to(roomId)
+          .except(`user:${req.userId}`)
+          .emit("room:member-removed", { roomId, memberId: req.userId });
+
+        // The only admin left, so someone was promoted automatically.
+        if (promotedId) {
+          io.to(roomId)
+            .except(`user:${req.userId}`)
+            .emit("room:member-promoted", { roomId, memberId: promotedId });
+        }
+      }
+
+      // Same event as being removed by an admin: the Dashboard drops the room
+      // from the sidebar and closes the chat/panel.
+      io.to(`user:${req.userId}`).emit("room:removed", { roomId });
+
+      // Remove the leaver's sockets from the Socket.IO room.
+      io.in(`user:${req.userId}`).socketsLeave(roomId);
+    }
+
+    res.status(200).json({
+      success: true,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function updateGroupName(req, res, next) {
   try {
     const { name } = req.body;
@@ -304,6 +344,7 @@ export {
   addMember,
   removeMember,
   makeAdmin,
+  leaveRoom,
   updateGroupName,
   updateGroupAvatar,
   removeGroupAvatar,
