@@ -113,6 +113,7 @@ export function MembersPanel({
 
   useEffect(() => {
     if (open) {
+      setMembers([]);
       setMemberSearch("");
       setIsEditingName(false);
       loadMembers();
