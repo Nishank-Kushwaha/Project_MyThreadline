@@ -39,6 +39,8 @@ function buildText(kind, actorName, targetName, meta) {
       return `${actorName} removed ${targetName}`;
     case "member-promoted":
       return `${actorName} made ${targetName} an admin`;
+    case "member-demoted":
+      return `${actorName} dismissed ${targetName} as an admin`;
     case "member-left":
       return `${actorName} left`;
     case "member-auto-promoted":

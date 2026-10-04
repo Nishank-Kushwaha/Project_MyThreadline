@@ -193,6 +193,34 @@ async function promoteToAdmin(roomId, requesterId, targetId) {
   return room;
 }
 
+async function demoteAdmin(roomId, requesterId, targetId) {
+  const room = await assertGroupAdmin(roomId, requesterId);
+
+  // The requester is an admin and can't demote themselves, so at least one
+  // admin (them) always remains.
+  if (targetId === requesterId) {
+    throw new ApiError(400, "You can't remove your own admin role");
+  }
+
+  const target = room.members.find((m) => m.userId.toString() === targetId);
+
+  if (!target) {
+    throw new ApiError(404, "That person isn't in this group");
+  }
+
+  if (!target.isAdmin) {
+    throw new ApiError(409, "That person isn't an admin");
+  }
+
+  target.isAdmin = false;
+
+  room.markModified("members");
+
+  await room.save();
+
+  return room;
+}
+
 async function leaveRoom(roomId, userId) {
   const room = await assertMembership(roomId, userId);
 
@@ -405,6 +433,7 @@ export {
   addRoomMember,
   removeRoomMember,
   promoteToAdmin,
+  demoteAdmin,
   leaveRoom,
   getRoomForUser,
   getRoomMemberIds,

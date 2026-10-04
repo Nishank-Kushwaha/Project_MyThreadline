@@ -215,6 +215,35 @@ export default function Dashboard() {
     };
   }, [socket]);
 
+  // My role in a group changed while I'm online (promoted, dismissed, or
+  // auto-promoted when the only admin left): keep the sidebar's copy in sync.
+  useEffect(() => {
+    if (!socket) return;
+
+    const setMyRole =
+      (isAdmin) =>
+      ({ roomId, memberId }) => {
+        if (memberId !== user?.id) return;
+
+        setRooms((prev) =>
+          prev.map((room) =>
+            room.id === roomId ? { ...room, isAdmin } : room,
+          ),
+        );
+      };
+
+    const handlePromoted = setMyRole(true);
+    const handleDemoted = setMyRole(false);
+
+    socket.on("room:member-promoted", handlePromoted);
+    socket.on("room:member-demoted", handleDemoted);
+
+    return () => {
+      socket.off("room:member-promoted", handlePromoted);
+      socket.off("room:member-demoted", handleDemoted);
+    };
+  }, [socket, user?.id]);
+
   useEffect(() => {
     setIsMembersOpen(false);
   }, [activeRoomId]);

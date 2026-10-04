@@ -244,6 +244,45 @@ async function makeAdmin(req, res, next) {
   }
 }
 
+async function demoteAdmin(req, res, next) {
+  try {
+    const { memberId } = req.params;
+
+    const room = await roomsService.demoteAdmin(
+      req.params.roomId,
+      req.userId,
+      memberId,
+    );
+
+    const roomId = room._id.toString();
+
+    const systemMessage = await createSystemMessage({
+      roomId,
+      kind: "member-demoted",
+      actorId: req.userId,
+      targetId: memberId,
+    });
+
+    const io = req.app.get("io");
+
+    if (io) {
+      // Everyone in the room (the demoted person included) sees the crown go.
+      io.to(roomId).emit("room:member-demoted", { roomId, memberId });
+
+      emitSystemMessage(io, roomId, systemMessage);
+    }
+
+    const members = await roomsService.getRoomMembers(roomId, req.userId);
+
+    res.status(200).json({
+      success: true,
+      members,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function leaveRoom(req, res, next) {
   try {
     const { roomId, promotedId, deleted } = await roomsService.leaveRoom(
@@ -445,6 +484,7 @@ export {
   addMember,
   removeMember,
   makeAdmin,
+  demoteAdmin,
   leaveRoom,
   updateGroupName,
   updateGroupAvatar,

@@ -18,6 +18,7 @@ import {
   Search,
   Loader2,
   LogOut,
+  ShieldOff,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,7 @@ import {
   addRoomMemberRequest,
   removeRoomMemberRequest,
   makeRoomAdminRequest,
+  demoteRoomAdminRequest,
   updateGroupNameRequest,
   updateGroupAvatarRequest,
   removeGroupAvatarRequest,
@@ -132,11 +134,13 @@ export function MembersPanel({
     socket.on("room:member-added", refresh);
     socket.on("room:member-removed", refresh);
     socket.on("room:member-promoted", refresh);
+    socket.on("room:member-demoted", refresh);
 
     return () => {
       socket.off("room:member-added", refresh);
       socket.off("room:member-removed", refresh);
       socket.off("room:member-promoted", refresh);
+      socket.off("room:member-demoted", refresh);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, open, room.id]);
@@ -272,6 +276,16 @@ export function MembersPanel({
     }
   };
 
+  const demoteMember = async (member) => {
+    setError("");
+    try {
+      const { data } = await demoteRoomAdminRequest(room.id, member.id);
+      setMembers(data.members);
+    } catch (err) {
+      setError(apiMessage(err, "Couldn't dismiss that person as admin."));
+    }
+  };
+
   const leaveGroup = async () => {
     setError("");
     try {
@@ -308,6 +322,16 @@ export function MembersPanel({
         "Admins can rename the group, change its photo and manage members.",
       confirmLabel: "Make admin",
       onConfirm: () => promoteMember(member),
+    });
+
+  const askDemoteMember = (member) =>
+    setConfirm({
+      title: `Dismiss ${member.name} as admin?`,
+      message:
+        "They'll stay in the group as a regular member and won't be able to rename it, change its photo or manage members.",
+      confirmLabel: "Dismiss as admin",
+      destructive: true,
+      onConfirm: () => demoteMember(member),
     });
 
   const askLeaveGroup = () => {
@@ -582,9 +606,10 @@ export function MembersPanel({
               <ul className="space-y-1">
                 {visibleMembers.map((member) => {
                   const isMe = member.id === currentUserId;
-                  // Admins can promote/remove regular members, never other
-                  // admins and never themselves.
+                  // Admins can promote/remove regular members, and dismiss
+                  // other admins. Never themselves.
                   const canManage = isAdmin && !member.isAdmin && !isMe;
+                  const canDemote = isAdmin && member.isAdmin && !isMe;
 
                   return (
                     <li
@@ -638,6 +663,20 @@ export function MembersPanel({
                             className="flex h-9 w-9 items-center justify-center rounded-md text-destructive hover:bg-destructive/10"
                           >
                             <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+
+                      {canDemote && (
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => askDemoteMember(member)}
+                            aria-label={`Dismiss ${member.name} as admin`}
+                            title="Dismiss as admin"
+                            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+                          >
+                            <ShieldOff className="h-4 w-4" />
                           </button>
                         </div>
                       )}

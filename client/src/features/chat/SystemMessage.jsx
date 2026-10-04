@@ -23,6 +23,8 @@ export function getSystemText(system, currentUserId) {
       return `${actor} removed ${target}`;
     case "member-promoted":
       return `${actor} made ${target} an admin`;
+    case "member-demoted":
+      return `${actor} dismissed ${target} as an admin`;
     case "member-left":
       return `${actor} left`;
     case "member-auto-promoted":
