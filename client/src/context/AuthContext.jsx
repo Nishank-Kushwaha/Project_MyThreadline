@@ -13,6 +13,7 @@ import {
   meRequest,
   refreshRequest,
 } from "@/api/authApi";
+import { unsubscribeFromPush } from "@/lib/push";
 
 const AuthContext = createContext(null);
 
@@ -50,6 +51,9 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // First: it needs the access token, which is cleared below. This is what
+    // stops the next person on a shared browser from getting your pushes.
+    await unsubscribeFromPush();
     await logoutRequest();
     setAccessToken(null);
     setUser(null);

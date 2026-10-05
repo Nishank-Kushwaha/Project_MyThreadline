@@ -17,6 +17,7 @@ import {
   useNotificationClicks,
   useUnreadTitle,
 } from "@/features/chat/useChatNotifications";
+import { usePushSubscription } from "@/features/chat/usePushSubscription";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -30,7 +31,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     listRoomsRequest().then(({ data }) => {
-      console.log("Fetched rooms:", data.rooms);
       setRooms(data.rooms);
     });
   }, []);
@@ -253,7 +253,6 @@ export default function Dashboard() {
   // This handles a notification click when no tab was open, where the service worker opens /?room=<id>
   useEffect(() => {
     listRoomsRequest().then(({ data }) => {
-      console.log("Fetched rooms:", data.rooms);
       setRooms(data.rooms);
 
       // Opened from a notification click with no app tab open: /?room=<id>
@@ -285,6 +284,7 @@ export default function Dashboard() {
     setIsSidebarOpen(false);
   };
 
+  usePushSubscription(user?.id);
   useChatNotifications({ socket, user, rooms });
   useUnreadTitle(rooms);
   useNotificationClicks((roomId) => {

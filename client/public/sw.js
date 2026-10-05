@@ -9,6 +9,28 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim()); // control already-open tabs
 });
 
+// A push arrived from the server. Phase 5 adds "skip if the app window is
+// visible"; for now it always shows, which is what we want while testing.
+self.addEventListener("push", (event) => {
+  let payload = {};
+
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title || "Threadline", {
+      body: payload.body,
+      icon: payload.icon,
+      tag: payload.tag,
+      data: payload.data,
+      renotify: Boolean(payload.tag),
+    }),
+  );
+});
+
 // Clicking a notification: focus the app (or open it) and tell it which room
 // to show. `data.roomId` is set by whoever created the notification.
 self.addEventListener("notificationclick", (event) => {

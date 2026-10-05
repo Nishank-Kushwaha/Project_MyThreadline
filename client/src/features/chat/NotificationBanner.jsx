@@ -6,6 +6,7 @@ import {
   requestNotificationPermission,
   showNotification,
 } from "@/lib/notifications";
+import { subscribeToPush } from "@/lib/push";
 
 const DISMISS_KEY = "threadline:notification-banner-dismissed";
 
@@ -22,7 +23,9 @@ export function NotificationBanner() {
   const [isDismissed, setIsDismissed] = useState(readDismissed);
 
   const enable = async () => {
-    setPermission(await requestNotificationPermission());
+    const result = await requestNotificationPermission();
+    setPermission(result);
+    if (result === "granted") subscribeToPush();
   };
 
   const dismiss = () => {
