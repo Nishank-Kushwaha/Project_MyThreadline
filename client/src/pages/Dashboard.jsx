@@ -12,6 +12,11 @@ import { Menu, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { MembersPanel } from "@/features/chat/MembersPanel";
 import { NotificationBanner } from "@/features/chat/NotificationBanner";
+import {
+  useChatNotifications,
+  useNotificationClicks,
+  useUnreadTitle,
+} from "@/features/chat/useChatNotifications";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -245,6 +250,21 @@ export default function Dashboard() {
     };
   }, [socket, user?.id]);
 
+  // This handles a notification click when no tab was open, where the service worker opens /?room=<id>
+  useEffect(() => {
+    listRoomsRequest().then(({ data }) => {
+      console.log("Fetched rooms:", data.rooms);
+      setRooms(data.rooms);
+
+      // Opened from a notification click with no app tab open: /?room=<id>
+      const roomId = new URLSearchParams(window.location.search).get("room");
+      if (roomId) {
+        if (data.rooms.some((r) => r.id === roomId)) handleSelectRoom(roomId);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     setIsMembersOpen(false);
   }, [activeRoomId]);
@@ -264,6 +284,12 @@ export default function Dashboard() {
     setIsNewChatOpen(false);
     setIsSidebarOpen(false);
   };
+
+  useChatNotifications({ socket, user, rooms });
+  useUnreadTitle(rooms);
+  useNotificationClicks((roomId) => {
+    if (rooms.some((r) => r.id === roomId)) handleSelectRoom(roomId);
+  });
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId) || null;
 
