@@ -11,6 +11,7 @@ import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Menu, X } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { MembersPanel } from "@/features/chat/MembersPanel";
+import { NotificationBanner } from "@/features/chat/NotificationBanner";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -312,6 +313,8 @@ export default function Dashboard() {
             New chat
           </Button>
         </div>
+
+        <NotificationBanner />
 
         <RoomList
           rooms={rooms}
