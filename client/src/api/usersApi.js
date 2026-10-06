@@ -14,3 +14,6 @@ export const uploadAvatarRequest = (file) => {
 export const removeAvatarRequest = () => api.delete("/users/me/avatar");
 
 export const listUsersRequest = () => api.get("/users");
+
+export const updateThemeRequest = (theme) =>
+  api.patch("/users/me/theme", { theme });

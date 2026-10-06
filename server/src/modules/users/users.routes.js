@@ -18,5 +18,6 @@ router.post(
 );
 router.delete("/me/avatar", usersController.removeAvatar);
 router.get("/", usersController.listUsers);
+router.patch("/me/theme", usersController.updateTheme);
 
 export default router;

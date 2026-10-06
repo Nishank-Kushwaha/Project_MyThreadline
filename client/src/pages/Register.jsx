@@ -13,6 +13,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { DriftingBubbles } from "@/components/magicui/drifting-bubbles";
+import { getSystemTheme } from "@/lib/themes";
 
 export default function Register() {
   const { register } = useAuth();
@@ -29,7 +30,7 @@ export default function Register() {
     setError("");
     setIsSubmitting(true);
     try {
-      await register(form);
+      await register({ ...form, theme: getSystemTheme() });
       navigate("/");
     } catch (err) {
       setError(

@@ -109,10 +109,21 @@ async function listOtherUsers(currentUserId) {
     .lean();
 }
 
+async function updateTheme(userId, theme) {
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { theme },
+    { new: true, runValidators: true },
+  );
+  if (!user) throw new ApiError(404, "User not found");
+  return authService.sanitizeUser(user);
+}
+
 export {
   updateName,
   updatePassword,
   updateAvatar,
   removeAvatar,
   listOtherUsers,
+  updateTheme,
 };

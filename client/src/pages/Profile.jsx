@@ -20,6 +20,7 @@ import {
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { X, Sparkles } from "lucide-react";
+import ThemePicker from "@/components/ui/ThemePicker";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
@@ -386,6 +387,19 @@ export default function Profile() {
           {nameStatus.success && (
             <p className="mt-2 text-sm text-primary">{nameStatus.success}</p>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Theme Picker */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>
+            Choose how the app looks. Saved to your account.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemePicker />
         </CardContent>
       </Card>
 

@@ -1,5 +1,6 @@
 import * as usersService from "./users.service.js";
 import ApiError from "../../utils/ApiError.js";
+import { THEME_IDS } from "../../constants/themes.js";
 
 async function updateProfile(req, res, next) {
   try {
@@ -59,4 +60,22 @@ async function listUsers(req, res, next) {
   }
 }
 
-export { updateProfile, changePassword, uploadAvatar, removeAvatar, listUsers };
+async function updateTheme(req, res, next) {
+  try {
+    const { theme } = req.body;
+    if (!THEME_IDS.includes(theme)) throw new ApiError(400, "Invalid theme");
+    const user = await usersService.updateTheme(req.userId, theme);
+    res.status(200).json({ success: true, user });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export {
+  updateProfile,
+  changePassword,
+  uploadAvatar,
+  removeAvatar,
+  listUsers,
+  updateTheme,
+};

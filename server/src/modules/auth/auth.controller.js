@@ -21,7 +21,7 @@ const refreshCookieOptions = {
 
 async function register(req, res, next) {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, theme } = req.body;
     if (!name || !email || !password)
       throw new ApiError(400, "Name, email and password are required");
     if (password.length < 6)
@@ -31,6 +31,7 @@ async function register(req, res, next) {
       name,
       email,
       password,
+      theme,
     });
     res.cookie(REFRESH_COOKIE_NAME, refreshToken, refreshCookieOptions);
     res.status(201).json({ success: true, user, accessToken });

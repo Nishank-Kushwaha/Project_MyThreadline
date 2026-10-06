@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { THEME_IDS, DEFAULT_THEME } from "../constants/themes.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -16,6 +17,7 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    theme: { type: String, enum: THEME_IDS, default: DEFAULT_THEME },
     password: { type: String, select: false }, // never returned by default queries
     googleId: { type: String, default: null },
     avatarUrl: { type: String, default: "" },
