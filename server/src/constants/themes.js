@@ -11,5 +11,14 @@ export const THEME_IDS = [
   "forest",
   "midnight",
   "coffee",
+  "sky",
+  "sand",
+  "lemon",
+  "slate",
+  "graphite",
+  "crimson",
+  "amethyst",
+  "nord",
+  "abyss",
 ];
 export const DEFAULT_THEME = "system";
