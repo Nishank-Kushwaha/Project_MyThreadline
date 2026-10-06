@@ -29,12 +29,6 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMembersOpen, setIsMembersOpen] = useState(false);
 
-  useEffect(() => {
-    listRoomsRequest().then(({ data }) => {
-      setRooms(data.rooms);
-    });
-  }, []);
-
   // Keep the sidebar live for EVERY room (preview, unread badge, ordering).
   useEffect(() => {
     if (!socket) return;
