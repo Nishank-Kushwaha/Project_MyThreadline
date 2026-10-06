@@ -9,8 +9,10 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim()); // control already-open tabs
 });
 
-// A push arrived from the server. Phase 5 adds "skip if the app window is
-// visible"; for now it always shows, which is what we want while testing.
+// A push arrived from the server. If the person is looking at the app right
+// now there is nothing to announce. Chrome allows skipping the notification
+// ONLY in this case (a visible AND focused window); in any other case it must
+// be shown, or Chrome displays a generic "site updated in the background".
 self.addEventListener("push", (event) => {
   let payload = {};
 
@@ -21,13 +23,26 @@ self.addEventListener("push", (event) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification(payload.title || "Threadline", {
-      body: payload.body,
-      icon: payload.icon,
-      tag: payload.tag,
-      data: payload.data,
-      renotify: Boolean(payload.tag),
-    }),
+    (async () => {
+      const windows = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+
+      const isLookingAtApp = windows.some(
+        (w) => w.visibilityState === "visible" && w.focused,
+      );
+
+      if (isLookingAtApp) return;
+
+      await self.registration.showNotification(payload.title || "Threadline", {
+        body: payload.body,
+        icon: payload.icon,
+        tag: payload.tag,
+        data: payload.data,
+        renotify: Boolean(payload.tag),
+      });
+    })(),
   );
 });
 

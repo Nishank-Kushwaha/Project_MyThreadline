@@ -1,6 +1,7 @@
 import * as roomsService from "./rooms.service.js";
 import ApiError from "../../utils/ApiError.js";
 import { createSystemMessage } from "../messages/messages.service.js";
+import { pushRoomAdded } from "../push/push.notifications.js";
 
 // After a room is created over REST, pull every OTHER member's live sockets
 // into it and tell their UI about it.
@@ -18,6 +19,7 @@ async function notifyMembers(req, roomId) {
     const roomForMember = await roomsService.getRoomForUser(roomId, memberId);
 
     io.to(`user:${memberId}`).emit("room:new", roomForMember);
+    pushRoomAdded(io, { userId: memberId, room: roomForMember });
   }
 }
 
@@ -125,6 +127,7 @@ async function addMember(req, res, next) {
       );
 
       io.to(`user:${memberId}`).emit("room:new", roomForNewMember);
+      pushRoomAdded(io, { userId: memberId, room: roomForNewMember });
 
       // Tell everyone already in the room that a member was added.
       io.to(roomId)

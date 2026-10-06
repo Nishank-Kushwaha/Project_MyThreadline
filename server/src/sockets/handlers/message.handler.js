@@ -1,6 +1,7 @@
 import Message from "../../models/Message.js";
 import Room from "../../models/Room.js";
 import ApiError from "../../utils/ApiError.js";
+import { pushNewMessage } from "../../modules/push/push.notifications.js";
 
 // Matches WhatsApp's own edit window — long enough to fix a typo, short
 // enough that an edit can't quietly rewrite history long after the fact.
@@ -60,6 +61,12 @@ function registerMessageHandlers(io, socket) {
 
       io.to(roomId).emit("message:new", { roomId, message });
       callback?.({ success: true, message });
+
+      // Push to members with no live connection. Not awaited: a slow push
+      // service must never delay the message itself. `deliveredTo` is exactly
+      // the list of members who are online right now.
+      const offlineIds = otherIds.filter((id) => !deliveredTo.includes(id));
+      pushNewMessage({ room, message, recipientIds: offlineIds });
     } catch (err) {
       callback?.({ success: false, message: err.message });
     }
