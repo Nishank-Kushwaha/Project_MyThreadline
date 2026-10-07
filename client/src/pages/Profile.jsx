@@ -18,12 +18,27 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
-import { cn } from "@/lib/utils";
-import { X, Sparkles } from "lucide-react";
+import { cn, resolveAvatarUrl } from "@/lib/utils";
+import { X, Sparkles, ArrowLeft } from "lucide-react";
 import ThemePicker from "@/components/ui/ThemePicker";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
+
+// Tighter card padding on phones, roomier from tablet up
+const HEADER = "p-4 sm:p-6 lg:p-5";
+const CONTENT = "p-4 pt-0 sm:p-6 sm:pt-0 lg:p-5 lg:pt-0";
+
+function PageTitle() {
+  return (
+    <div>
+      <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Profile</h1>
+      <p className="text-sm text-muted-foreground">
+        Manage your photo, name, appearance and password.
+      </p>
+    </div>
+  );
+}
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
@@ -40,7 +55,6 @@ export default function Profile() {
     currentPassword: "",
     newPassword: "",
   });
-
   const [passwordStatus, setPasswordStatus] = useState({
     error: "",
     success: "",
@@ -48,16 +62,13 @@ export default function Profile() {
   });
 
   const [avatarPreview, setAvatarPreview] = useState(null);
-
   const [avatarStatus, setAvatarStatus] = useState({
     error: "",
     loading: false,
     action: null,
   });
 
-  // Controls the larger profile-photo dialog
   const [showAvatarDialog, setShowAvatarDialog] = useState(false);
-
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
 
   const handleNameSave = async (e) => {
@@ -67,12 +78,7 @@ export default function Profile() {
     try {
       const { data } = await updateProfileRequest({ name });
       updateUser(data.user);
-
-      setNameStatus({
-        error: "",
-        success: "Saved.",
-        loading: false,
-      });
+      setNameStatus({ error: "", success: "Saved.", loading: false });
     } catch (err) {
       setNameStatus({
         error: err.response?.data?.message || "Couldn't save your name.",
@@ -88,12 +94,7 @@ export default function Profile() {
 
     try {
       await changePasswordRequest(passwordForm);
-
-      setPasswordForm({
-        currentPassword: "",
-        newPassword: "",
-      });
-
+      setPasswordForm({ currentPassword: "", newPassword: "" });
       setPasswordStatus({
         error: "",
         success: "Password updated.",
@@ -109,7 +110,8 @@ export default function Profile() {
   };
 
   const uploadAvatarFile = async (file) => {
-    setAvatarPreview(URL.createObjectURL(file));
+    const objectUrl = URL.createObjectURL(file);
+    setAvatarPreview(objectUrl);
     setAvatarStatus({ error: "", loading: true, action: "upload" });
 
     try {
@@ -124,6 +126,7 @@ export default function Profile() {
       });
     } finally {
       setAvatarPreview(null);
+      URL.revokeObjectURL(objectUrl);
     }
   };
 
@@ -142,25 +145,13 @@ export default function Profile() {
     )
       return;
 
-    setAvatarStatus({
-      error: "",
-      loading: true,
-      action: "remove",
-    });
+    setAvatarStatus({ error: "", loading: true, action: "remove" });
 
     try {
       const { data } = await removeAvatarRequest();
-
       updateUser(data.user);
-
-      // Close the dialog if the photo was being viewed
       setShowAvatarDialog(false);
-
-      setAvatarStatus({
-        error: "",
-        loading: false,
-        action: null,
-      });
+      setAvatarStatus({ error: "", loading: false, action: null });
     } catch (err) {
       setAvatarStatus({
         error: err.response?.data?.message || "Couldn't remove your photo.",
@@ -175,158 +166,328 @@ export default function Profile() {
   const isRemoving = avatarStatus.loading && avatarStatus.action === "remove";
 
   return (
-    <div className="mx-auto max-w-xl space-y-6 p-6">
-      <button
-        onClick={() => navigate("/")}
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← Back
-      </button>
+    <div className="mx-auto w-full max-w-screen-2xl px-4 py-4 sm:px-6 sm:py-6 lg:h-dvh lg:min-h-176 lg:px-8 lg:py-6">
+      {/* Page header */}
+      <header className="mb-4 flex flex-col gap-2 sm:mb-6 sm:flex-row sm:items-center sm:justify-between lg:hidden">
+        <PageTitle />
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-ml-3 w-fit sm:ml-0"
+          onClick={() => navigate("/")}
+        >
+          <ArrowLeft className="mr-1.5 h-4 w-4" />
+          Back
+        </Button>
+      </header>
 
-      {/* Avatar */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Photo</CardTitle>
-          <CardDescription>Shown next to your messages.</CardDescription>
-        </CardHeader>
-
-        <CardContent className="flex items-center gap-4">
-          {/* Clickable Avatar */}
-          <button
-            type="button"
-            disabled={!user?.avatarUrl}
-            onClick={() => setShowAvatarDialog(true)}
-            className={cn(
-              "rounded-full",
-              user?.avatarUrl &&
-                "cursor-pointer transition-transform hover:scale-105 active:scale-95",
-            )}
-            aria-label={
-              user?.avatarUrl ? "View profile photo" : "No profile photo"
-            }
-          >
-            <Avatar
-              src={currentAvatar}
-              name={user?.name}
-              alt="Your avatar"
-              className="h-16 w-16 text-lg"
-            />
-          </button>
-
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 px-3"
-                disabled={avatarStatus.loading}
-                onClick={() => setShowAvatarPicker(true)}
-              >
-                <Sparkles className="mr-1.5 h-4 w-4" />
-                Avatar picker
-              </Button>
-
-              <Label
-                htmlFor="avatar"
-                className={cn(
-                  "cursor-pointer",
-                  avatarStatus.loading && "pointer-events-none opacity-60",
-                )}
-              >
-                <span className="inline-flex h-9 items-center rounded-md border border-input px-3 text-sm font-medium hover:bg-accent">
-                  {isUploading ? "Uploading…" : "Change photo"}
-                </span>
-              </Label>
-
-              <input
-                id="avatar"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                disabled={avatarStatus.loading}
-                onChange={handleAvatarChange}
-              />
-
-              {user?.avatarUrl && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="border border-input text-destructive hover:text-destructive"
-                  disabled={avatarStatus.loading}
-                  onClick={handleAvatarRemove}
-                >
-                  {isRemoving ? "Removing…" : "Remove photo"}
-                </Button>
-              )}
-            </div>
-
-            {avatarStatus.error && (
-              <p className="mt-2 text-sm text-destructive">
-                {avatarStatus.error}
-              </p>
-            )}
+      {/* Phone: 1 column · Tablet: photo on top, cards 2-up · Laptop: photo sidebar + content */}
+      <div className="grid items-start gap-4 sm:gap-6 lg:h-full lg:grid-cols-12 lg:grid-rows-1">
+        {/* Sidebar: on laptop the title and photo card sit together on the left */}
+        <aside className="space-y-4 sm:space-y-6 lg:col-span-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:gap-4 lg:space-y-0 xl:col-span-3">
+          <div className="hidden space-y-1 lg:block">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="-ml-3"
+              onClick={() => navigate("/")}
+            >
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
+              Back
+            </Button>
+            <PageTitle />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Profile Photo Dialog */}
+          {/* Photo / identity */}
+          <Card className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+            <CardHeader className={cn(HEADER, "lg:hidden")}>
+              <CardTitle>Photo</CardTitle>
+              <CardDescription>Shown next to your messages.</CardDescription>
+            </CardHeader>
+
+            <CardContent
+              className={cn(
+                CONTENT,
+                "flex flex-col items-center gap-5 text-center",
+                "sm:flex-row sm:items-center sm:gap-6 sm:text-left",
+                "lg:flex-1 lg:flex-col lg:justify-center lg:gap-5 lg:p-5 lg:text-center",
+              )}
+            >
+              <button
+                type="button"
+                disabled={!user?.avatarUrl}
+                onClick={() => setShowAvatarDialog(true)}
+                className={cn(
+                  "shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  user?.avatarUrl &&
+                    "cursor-pointer transition-transform hover:scale-105 active:scale-95",
+                )}
+                aria-label={
+                  user?.avatarUrl ? "View profile photo" : "No profile photo"
+                }
+              >
+                <Avatar
+                  src={currentAvatar}
+                  name={user?.name}
+                  alt="Your avatar"
+                  className="h-24 w-24 text-3xl sm:h-28 sm:w-28 lg:h-36 lg:w-36 lg:text-5xl xl:h-44 xl:w-44 xl:text-6xl"
+                />
+              </button>
+
+              <div className="w-full min-w-0 space-y-4 sm:flex-1 lg:flex-none lg:space-y-5">
+                <div className="min-w-0">
+                  <p className="truncate text-base font-semibold">
+                    {user?.name}
+                  </p>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {user?.email}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:flex-col">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full sm:w-auto lg:w-full"
+                    disabled={avatarStatus.loading}
+                    onClick={() => setShowAvatarPicker(true)}
+                  >
+                    <Sparkles className="mr-1.5 h-4 w-4" />
+                    Avatar picker
+                  </Button>
+
+                  {/* sr-only (not hidden) keeps the file input keyboard-focusable */}
+                  <input
+                    id="avatar"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="peer sr-only"
+                    disabled={avatarStatus.loading}
+                    onChange={handleAvatarChange}
+                  />
+                  <Label
+                    htmlFor="avatar"
+                    className={cn(
+                      "block w-full cursor-pointer rounded-md sm:w-auto lg:w-full",
+                      "peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
+                      avatarStatus.loading && "pointer-events-none opacity-60",
+                    )}
+                  >
+                    <span className="flex h-10 w-full items-center justify-center rounded-md border border-input px-4 text-sm font-medium hover:bg-accent">
+                      {isUploading ? "Uploading…" : "Change photo"}
+                    </span>
+                  </Label>
+
+                  {user?.avatarUrl && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full border border-input text-destructive hover:text-destructive sm:w-auto lg:w-full"
+                      disabled={avatarStatus.loading}
+                      onClick={handleAvatarRemove}
+                    >
+                      {isRemoving ? "Removing…" : "Remove photo"}
+                    </Button>
+                  )}
+                </div>
+
+                {avatarStatus.error && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {avatarStatus.error}
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </aside>
+
+        {/* Settings column */}
+        <div className="flex flex-col gap-4 sm:gap-6 lg:col-span-8 lg:h-full lg:min-h-0 xl:col-span-9">
+          <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:shrink-0">
+            {/* Name and Email */}
+            <Card id="profile-info" className="scroll-mt-6">
+              <CardHeader className={HEADER}>
+                <CardTitle>Profile information</CardTitle>
+                <CardDescription>
+                  Update your name. Your email address cannot be changed.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className={CONTENT}>
+                <form onSubmit={handleNameSave} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Name</Label>
+                    <Input
+                      id="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                      minLength={2}
+                      autoComplete="name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={user?.email || ""}
+                      readOnly
+                      className="cursor-not-allowed bg-muted"
+                    />
+                  </div>
+
+                  <div className="flex justify-end">
+                    <Button
+                      type="submit"
+                      className="w-full sm:w-auto"
+                      disabled={nameStatus.loading}
+                    >
+                      {nameStatus.loading ? "Saving…" : "Save"}
+                    </Button>
+                  </div>
+                </form>
+
+                {nameStatus.error && (
+                  <p role="alert" className="mt-2 text-sm text-destructive">
+                    {nameStatus.error}
+                  </p>
+                )}
+                {nameStatus.success && (
+                  <p role="status" className="mt-2 text-sm text-primary">
+                    {nameStatus.success}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Password */}
+            <Card id="password" className="scroll-mt-6">
+              <CardHeader className={HEADER}>
+                <CardTitle>Password</CardTitle>
+                <CardDescription>
+                  Signed up with Google and never set a password? Leave "current
+                  password" blank.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className={CONTENT}>
+                <form onSubmit={handlePasswordSave} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="currentPassword">Current password</Label>
+                    <Input
+                      id="currentPassword"
+                      type="password"
+                      autoComplete="current-password"
+                      value={passwordForm.currentPassword}
+                      onChange={(e) =>
+                        setPasswordForm((f) => ({
+                          ...f,
+                          currentPassword: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="newPassword">New password</Label>
+                    <Input
+                      id="newPassword"
+                      type="password"
+                      autoComplete="new-password"
+                      value={passwordForm.newPassword}
+                      onChange={(e) =>
+                        setPasswordForm((f) => ({
+                          ...f,
+                          newPassword: e.target.value,
+                        }))
+                      }
+                      required
+                      minLength={6}
+                    />
+                  </div>
+
+                  {passwordStatus.error && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {passwordStatus.error}
+                    </p>
+                  )}
+                  {passwordStatus.success && (
+                    <p role="status" className="text-sm text-primary">
+                      {passwordStatus.success}
+                    </p>
+                  )}
+
+                  <div className="flex justify-end">
+                    <Button
+                      type="submit"
+                      className="w-full sm:w-auto"
+                      disabled={passwordStatus.loading}
+                    >
+                      {passwordStatus.loading ? "Updating…" : "Update password"}
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          </div>
+          {/* Appearance: card fills the leftover height; only its theme list scrolls */}
+          <Card
+            id="appearance"
+            className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col"
+          >
+            <CardHeader className={HEADER}>
+              <CardTitle>Appearance</CardTitle>
+              <CardDescription>
+                Choose how the app looks. Saved to your account.
+              </CardDescription>
+            </CardHeader>
+            <CardContent
+              className={cn(
+                CONTENT,
+                "max-h-88 overflow-y-auto pt-1 sm:max-h-104 sm:pt-1 lg:max-h-none lg:min-h-0 lg:flex-1 lg:overscroll-contain lg:pt-1 scrollbar-thin",
+              )}
+            >
+              <ThemePicker />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Profile photo viewer */}
       {showAvatarDialog && user?.avatarUrl && (
         <div
           className="fixed inset-0 z-100 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
           onMouseDown={(e) => {
-            // Clicking outside the image closes the dialog
-            if (e.target === e.currentTarget) {
-              setShowAvatarDialog(false);
-            }
+            if (e.target === e.currentTarget) setShowAvatarDialog(false);
           }}
         >
-          <div className="relative max-w-[90vw]">
-            {/* Close button */}
+          <div className="relative max-w-[92vw]">
             <button
               type="button"
               onClick={() => setShowAvatarDialog(false)}
-              className={cn(
-                "absolute -right-3 -top-3 z-20",
-                "flex h-9 w-9 items-center justify-center",
-                "rounded-full",
-                "border border-border/60",
-                "bg-background text-foreground",
-                "shadow-lg",
-                "transition-all duration-200",
-                "hover:scale-105 hover:bg-muted",
-                "active:scale-95",
-              )}
+              className="absolute -right-2 -top-2 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background text-foreground shadow-lg transition-all duration-200 hover:scale-105 hover:bg-muted active:scale-95 sm:-right-3 sm:-top-3"
               aria-label="Close photo"
             >
               <X className="h-5 w-5" />
             </button>
 
-            {/* Larger image */}
-            <div
-              className={cn(
-                "overflow-hidden rounded-2xl",
-                "border border-white/20",
-                "bg-black/20",
-                "p-1",
-                "shadow-2xl shadow-black/40",
-              )}
-            >
+            <div className="overflow-hidden rounded-2xl border border-white/20 bg-black/20 p-1 shadow-2xl shadow-black/40">
               <img
-                src={user.avatarUrl}
+                src={resolveAvatarUrl(user.avatarUrl)}
                 alt={`${user?.name || "User"} profile`}
-                className={cn(
-                  "block max-h-[80vh] max-w-[90vw]",
-                  "rounded-xl",
-                  "object-contain",
-                )}
+                referrerPolicy="no-referrer"
+                className="block max-h-[80vh] max-w-[92vw] rounded-xl object-contain"
               />
             </div>
           </div>
         </div>
       )}
 
-      {/* Avatar Picker Dialog */}
+      {/* Avatar picker */}
       {showAvatarPicker && (
         <Suspense fallback={null}>
           <AvatarPicker
@@ -336,131 +497,6 @@ export default function Profile() {
           />
         </Suspense>
       )}
-
-      {/* Name and Email */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile Information</CardTitle>
-          <CardDescription>
-            Update your name. Your email address cannot be changed.
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <form onSubmit={handleNameSave} className="space-y-4">
-            {/* Name */}
-            <div className="space-y-2">
-              <Label htmlFor="name">Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                minLength={2}
-              />
-            </div>
-
-            {/* Email */}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={user?.email}
-                readOnly
-                className="cursor-not-allowed bg-muted"
-              />
-            </div>
-
-            {/* Save Button */}
-            <div className="flex justify-end">
-              <Button type="submit" disabled={nameStatus.loading}>
-                {nameStatus.loading ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </form>
-
-          {nameStatus.error && (
-            <p className="mt-2 text-sm text-destructive">{nameStatus.error}</p>
-          )}
-
-          {nameStatus.success && (
-            <p className="mt-2 text-sm text-primary">{nameStatus.success}</p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Theme Picker */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-          <CardDescription>
-            Choose how the app looks. Saved to your account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ThemePicker />
-        </CardContent>
-      </Card>
-
-      {/* Password */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Password</CardTitle>
-          <CardDescription>
-            Signed up with Google and never set a password? Leave "current
-            password" blank.
-          </CardDescription>
-        </CardHeader>
-
-        <CardContent>
-          <form onSubmit={handlePasswordSave} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="currentPassword">Current password</Label>
-              <Input
-                id="currentPassword"
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(e) =>
-                  setPasswordForm((f) => ({
-                    ...f,
-                    currentPassword: e.target.value,
-                  }))
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="newPassword">New password</Label>
-              <Input
-                id="newPassword"
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(e) =>
-                  setPasswordForm((f) => ({
-                    ...f,
-                    newPassword: e.target.value,
-                  }))
-                }
-                required
-                minLength={6}
-              />
-            </div>
-
-            {passwordStatus.error && (
-              <p className="text-sm text-destructive">{passwordStatus.error}</p>
-            )}
-
-            {passwordStatus.success && (
-              <p className="text-sm text-primary">{passwordStatus.success}</p>
-            )}
-
-            <Button type="submit" disabled={passwordStatus.loading}>
-              {passwordStatus.loading ? "Updating…" : "Update password"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
     </div>
   );
 }
