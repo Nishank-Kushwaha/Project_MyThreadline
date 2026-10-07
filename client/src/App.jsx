@@ -9,6 +9,7 @@ import Profile from "@/pages/Profile";
 import OAuthCallback from "@/pages/OAuthCallback";
 import { SocketProvider } from "@/context/SocketContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { NotificationManager } from "@/features/chat/NotificationManager";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <AuthProvider>
         <ThemeProvider>
           <SocketProvider>
+            <NotificationManager />
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />

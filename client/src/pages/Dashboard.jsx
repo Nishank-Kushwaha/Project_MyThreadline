@@ -13,11 +13,9 @@ import { Avatar } from "@/components/ui/avatar";
 import { MembersPanel } from "@/features/chat/MembersPanel";
 import { NotificationBanner } from "@/features/chat/NotificationBanner";
 import {
-  useChatNotifications,
   useNotificationClicks,
   useUnreadTitle,
 } from "@/features/chat/useChatNotifications";
-import { usePushSubscription } from "@/features/chat/usePushSubscription";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -278,8 +276,6 @@ export default function Dashboard() {
     setIsSidebarOpen(false);
   };
 
-  usePushSubscription(user?.id);
-  useChatNotifications({ socket, user, rooms });
   useUnreadTitle(rooms);
   useNotificationClicks((roomId) => {
     if (rooms.some((r) => r.id === roomId)) handleSelectRoom(roomId);

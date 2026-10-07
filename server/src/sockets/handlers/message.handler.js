@@ -59,7 +59,17 @@ function registerMessageHandlers(io, socket) {
       };
       await room.save();
 
-      io.to(roomId).emit("message:new", { roomId, message });
+      io.to(roomId).emit("message:new", {
+        roomId,
+        message,
+        // Lets any page build a notification without already knowing the room.
+        room: {
+          type: room.type,
+          name: room.name,
+          avatarUrl: room.groupAvatarUrl,
+        },
+      });
+
       callback?.({ success: true, message });
 
       // Push to members with no live connection. Not awaited: a slow push

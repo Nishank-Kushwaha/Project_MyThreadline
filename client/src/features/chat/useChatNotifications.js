@@ -24,24 +24,17 @@ function notify(options) {
 
 // Shows a browser notification for new messages and for being added to a
 // chat/group, but only while the app is in the background.
-export function useChatNotifications({ socket, user, rooms }) {
-  // The listeners below read the latest rooms without re-subscribing every
-  // time the list changes.
-  const roomsRef = useRef(rooms);
-  roomsRef.current = rooms;
-
-  // Phase 6 will store these on the user; until then both default to on.
+export function useChatNotifications({ socket, user }) {
   const enabled = user?.notificationSettings?.enabled ?? true;
   const showPreview = user?.notificationSettings?.showPreview ?? true;
 
   useEffect(() => {
     if (!socket || !user?.id || !enabled) return;
 
-    const handleNewMessage = ({ roomId, message }) => {
+    const handleNewMessage = ({ roomId, message, room }) => {
       if (message.sender._id === user.id) return;
       if (!isAppInBackground()) return;
 
-      const room = roomsRef.current.find((r) => r.id === roomId);
       const isGroup = room?.type === "group";
 
       // The sender's name always shows; the text only when previews are on.
