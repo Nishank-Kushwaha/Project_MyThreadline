@@ -71,6 +71,30 @@ async function updateTheme(req, res, next) {
   }
 }
 
+async function updateNotificationSettings(req, res, next) {
+  try {
+    const { enabled, showPreview } = req.body;
+    const isBool = (value) => typeof value === "boolean";
+
+    const nothingSent = enabled === undefined && showPreview === undefined;
+    const badValue =
+      (enabled !== undefined && !isBool(enabled)) ||
+      (showPreview !== undefined && !isBool(showPreview));
+
+    if (nothingSent || badValue) {
+      throw new ApiError(400, "enabled and showPreview must be true or false");
+    }
+
+    const user = await usersService.updateNotificationSettings(req.userId, {
+      enabled,
+      showPreview,
+    });
+    res.status(200).json({ success: true, user });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export {
   updateProfile,
   changePassword,
@@ -78,4 +102,5 @@ export {
   removeAvatar,
   listUsers,
   updateTheme,
+  updateNotificationSettings,
 };

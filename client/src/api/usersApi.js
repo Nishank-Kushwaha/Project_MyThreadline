@@ -17,3 +17,6 @@ export const listUsersRequest = () => api.get("/users");
 
 export const updateThemeRequest = (theme) =>
   api.patch("/users/me/theme", { theme });
+
+export const updateNotificationSettingsRequest = (data) =>
+  api.patch("/users/me/notifications", data);

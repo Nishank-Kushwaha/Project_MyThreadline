@@ -19,5 +19,6 @@ router.post(
 router.delete("/me/avatar", usersController.removeAvatar);
 router.get("/", usersController.listUsers);
 router.patch("/me/theme", usersController.updateTheme);
+router.patch("/me/notifications", usersController.updateNotificationSettings);
 
 export default router;

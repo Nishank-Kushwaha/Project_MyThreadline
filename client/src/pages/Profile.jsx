@@ -6,6 +6,7 @@ import {
   changePasswordRequest,
   uploadAvatarRequest,
   removeAvatarRequest,
+  updateNotificationSettingsRequest,
 } from "@/api/usersApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,20 @@ import {
 } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
-import { X, Sparkles, ArrowLeft } from "lucide-react";
+import {
+  X,
+  Sparkles,
+  ArrowLeft,
+  Bell,
+  BellOff,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import {
+  getNotificationPermission,
+  requestNotificationPermission,
+} from "@/lib/notifications";
+import { subscribeToPush } from "@/lib/push";
 import ThemePicker from "@/components/ui/ThemePicker";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
@@ -66,6 +80,10 @@ export default function Profile() {
     error: "",
     loading: false,
     action: null,
+  });
+  const [notificationStatus, setNotificationStatus] = useState({
+    error: "",
+    loading: false,
   });
 
   const [showAvatarDialog, setShowAvatarDialog] = useState(false);
@@ -157,6 +175,42 @@ export default function Profile() {
         error: err.response?.data?.message || "Couldn't remove your photo.",
         loading: false,
         action: null,
+      });
+    }
+  };
+
+  const notificationSettings = {
+    enabled: user?.notificationSettings?.enabled ?? true,
+    showPreview: user?.notificationSettings?.showPreview ?? true,
+  };
+
+  const handleNotificationToggle = async (key) => {
+    const previous = notificationSettings;
+    const next = { ...previous, [key]: !previous[key] };
+
+    // Turning notifications on: make sure the browser is allowed to show them.
+    // Asked first, straight from the click, because browsers only honour the
+    // permission prompt right after a user gesture.
+    if (key === "enabled" && next.enabled) {
+      if (getNotificationPermission() === "default") {
+        await requestNotificationPermission();
+      }
+      subscribeToPush(); // no-op unless permission is granted
+    }
+
+    setNotificationStatus({ error: "", loading: true });
+    updateUser({ notificationSettings: next }); // instant feedback
+
+    try {
+      const { data } = await updateNotificationSettingsRequest(next);
+      updateUser(data.user);
+      setNotificationStatus({ error: "", loading: false });
+    } catch (err) {
+      updateUser({ notificationSettings: previous }); // put it back
+      setNotificationStatus({
+        error:
+          err.response?.data?.message || "Couldn't save notification settings.",
+        loading: false,
       });
     }
   };
@@ -296,6 +350,82 @@ export default function Profile() {
                 {avatarStatus.error && (
                   <p role="alert" className="text-sm text-destructive">
                     {avatarStatus.error}
+                  </p>
+                )}
+
+                {/* Notification switches (saved to your account) */}
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap lg:flex-col">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-pressed={notificationSettings.enabled}
+                    className="w-full justify-between sm:w-auto lg:w-full"
+                    disabled={notificationStatus.loading}
+                    onClick={() => handleNotificationToggle("enabled")}
+                  >
+                    <span className="flex items-center">
+                      {notificationSettings.enabled ? (
+                        <Bell className="mr-1.5 h-4 w-4" />
+                      ) : (
+                        <BellOff className="mr-1.5 h-4 w-4" />
+                      )}
+                      Notifications
+                    </span>
+                    <span
+                      className={cn(
+                        "ml-3 text-xs font-semibold",
+                        notificationSettings.enabled
+                          ? "text-primary"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {notificationSettings.enabled ? "On" : "Off"}
+                    </span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-pressed={notificationSettings.showPreview}
+                    className="w-full justify-between sm:w-auto lg:w-full"
+                    disabled={
+                      notificationStatus.loading ||
+                      !notificationSettings.enabled
+                    }
+                    onClick={() => handleNotificationToggle("showPreview")}
+                  >
+                    <span className="flex items-center">
+                      {notificationSettings.showPreview ? (
+                        <Eye className="mr-1.5 h-4 w-4" />
+                      ) : (
+                        <EyeOff className="mr-1.5 h-4 w-4" />
+                      )}
+                      Show message text
+                    </span>
+                    <span
+                      className={cn(
+                        "ml-3 text-xs font-semibold",
+                        notificationSettings.showPreview
+                          ? "text-primary"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {notificationSettings.showPreview ? "On" : "Off"}
+                    </span>
+                  </Button>
+                </div>
+
+                {notificationSettings.enabled &&
+                  getNotificationPermission() === "denied" && (
+                    <p className="text-xs text-muted-foreground">
+                      Your browser is blocking notifications for this site.
+                      Allow them in the browser's site settings.
+                    </p>
+                  )}
+
+                {notificationStatus.error && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {notificationStatus.error}
                   </p>
                 )}
               </div>

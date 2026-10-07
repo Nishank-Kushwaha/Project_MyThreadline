@@ -119,6 +119,22 @@ async function updateTheme(userId, theme) {
   return authService.sanitizeUser(user);
 }
 
+async function updateNotificationSettings(userId, { enabled, showPreview }) {
+  // Only touch the keys that were sent.
+  const update = {};
+  if (enabled !== undefined) update["notificationSettings.enabled"] = enabled;
+  if (showPreview !== undefined) {
+    update["notificationSettings.showPreview"] = showPreview;
+  }
+
+  const user = await User.findByIdAndUpdate(userId, update, {
+    new: true,
+    runValidators: true,
+  });
+  if (!user) throw new ApiError(404, "User not found");
+  return authService.sanitizeUser(user);
+}
+
 export {
   updateName,
   updatePassword,
@@ -126,4 +142,5 @@ export {
   removeAvatar,
   listOtherUsers,
   updateTheme,
+  updateNotificationSettings,
 };

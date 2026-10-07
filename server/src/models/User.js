@@ -17,6 +17,10 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    notificationSettings: {
+      enabled: { type: Boolean, default: true },
+      showPreview: { type: Boolean, default: true },
+    },
     theme: { type: String, enum: THEME_IDS, default: DEFAULT_THEME },
     password: { type: String, select: false }, // never returned by default queries
     googleId: { type: String, default: null },

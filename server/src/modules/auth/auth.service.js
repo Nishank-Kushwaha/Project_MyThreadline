@@ -52,6 +52,10 @@ function sanitizeUser(user) {
     status: user.status,
     lastSeen: user.lastSeen,
     theme: user.theme,
+    notificationSettings: {
+      enabled: user.notificationSettings?.enabled ?? true,
+      showPreview: user.notificationSettings?.showPreview ?? true,
+    },
   };
 }
 
