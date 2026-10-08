@@ -1,5 +1,8 @@
 // Small wrapper around the browser's notification + service worker APIs.
 
+const BROWSER_FLAG_KEY = "threadline:browser-notifications";
+export const BROWSER_NOTIFICATIONS_EVENT = "threadline:browser-notifications";
+
 export function isNotificationSupported() {
   return "Notification" in window && "serviceWorker" in navigator;
 }
@@ -44,4 +47,23 @@ export async function showNotification({ title, body, icon, tag, data }) {
   });
 
   return true;
+}
+
+// On unless this browser was switched off from the dashboard.
+export function isBrowserNotificationsOn() {
+  try {
+    return localStorage.getItem(BROWSER_FLAG_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setBrowserNotificationsOn(isOn) {
+  try {
+    if (isOn) localStorage.removeItem(BROWSER_FLAG_KEY);
+    else localStorage.setItem(BROWSER_FLAG_KEY, "off");
+  } catch {
+    // storage unavailable: the choice just isn't remembered
+  }
+  window.dispatchEvent(new Event(BROWSER_NOTIFICATIONS_EVENT));
 }

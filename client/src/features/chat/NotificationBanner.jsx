@@ -1,96 +1,102 @@
 import React, { useState } from "react";
-import { Bell, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Bell, BellOff } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { cn } from "@/lib/utils";
 import {
   getNotificationPermission,
   requestNotificationPermission,
-  showNotification,
+  setBrowserNotificationsOn,
 } from "@/lib/notifications";
-import { subscribeToPush } from "@/lib/push";
-
-const DISMISS_KEY = "threadline:notification-banner-dismissed";
-
-function readDismissed() {
-  try {
-    return localStorage.getItem(DISMISS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
+import { subscribeToPush, unsubscribeFromPush } from "@/lib/push";
+import { useBrowserNotificationsOn } from "./useBrowserNotifications";
 
 export function NotificationBanner() {
+  const { user } = useAuth();
+  const browserOn = useBrowserNotificationsOn();
   const [permission, setPermission] = useState(getNotificationPermission);
-  const [isDismissed, setIsDismissed] = useState(readDismissed);
+  const [busy, setBusy] = useState(false);
 
-  const enable = async () => {
-    const result = await requestNotificationPermission();
-    setPermission(result);
-    if (result === "granted") subscribeToPush();
-  };
-
-  const dismiss = () => {
-    setIsDismissed(true);
-    try {
-      localStorage.setItem(DISMISS_KEY, "1");
-    } catch {
-      // storage unavailable: the banner just comes back next visit
-    }
-  };
-
-  // TEMP (Phase 1 testing only): remove once real notifications are wired up.
-  const sendTest = () =>
-    showNotification({
-      title: "Threadline",
-      body: "Notifications are working.",
-      tag: "test",
-      data: { roomId: null },
-    });
+  const accountEnabled = user?.notificationSettings?.enabled ?? true;
 
   if (permission === "unsupported") return null;
 
-  if (permission === "granted") {
-    return (
-      <div className="px-4 pb-3">
-        <button
-          onClick={sendTest}
-          className="text-xs text-muted-foreground underline hover:text-foreground"
-        >
-          Send test notification
-        </button>
-      </div>
-    );
-  }
+  const isBlocked = permission === "denied";
+  const isOn = permission === "granted" && browserOn;
 
-  if (isDismissed) return null;
+  // The label never changes (the switch shows on/off). The hint explains scope,
+  // or the special states.
+  let hint = "This browser only";
+
+  if (isBlocked) hint = "Blocked: allow it in browser settings";
+  else if (isOn && !accountEnabled) hint = "Paused: off in your profile";
+
+  const toggle = async () => {
+    setBusy(true);
+
+    try {
+      if (isOn) {
+        setBrowserNotificationsOn(false);
+        await unsubscribeFromPush();
+        return;
+      }
+
+      let current = permission;
+
+      if (current === "default") {
+        current = await requestNotificationPermission();
+        setPermission(current);
+      }
+
+      if (current !== "granted") return;
+
+      setBrowserNotificationsOn(true);
+      subscribeToPush();
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="px-4 pb-3">
-      <div className="relative rounded-md border border-border bg-muted p-3 text-xs">
-        <button
-          onClick={dismiss}
-          aria-label="Dismiss"
-          className="absolute right-1.5 top-1.5 rounded p-1 text-muted-foreground hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-3 py-1.5">
+        <div className="flex min-w-0 items-center gap-2">
+          {isOn ? (
+            <Bell className="h-4 w-4 shrink-0 text-primary" />
+          ) : (
+            <BellOff className="h-4 w-4 shrink-0 text-muted-foreground" />
+          )}
 
-        {permission === "denied" ? (
-          <p className="pr-5 text-muted-foreground">
-            Notifications are blocked for this site. Allow them in your
-            browser's site settings to get alerts when this tab is in the
-            background.
-          </p>
-        ) : (
-          <>
-            <p className="pr-5 text-muted-foreground">
-              Get alerted about new messages when this tab is in the background.
+          <div className="min-w-0">
+            <p className="truncate text-xs font-medium leading-tight">
+              Browser notifications
             </p>
-            <Button size="sm" className="mt-2 h-8 w-full" onClick={enable}>
-              <Bell className="mr-1.5 h-3.5 w-3.5" />
-              Enable notifications
-            </Button>
-          </>
-        )}
+            <p className="truncate text-[11px] leading-tight text-muted-foreground">
+              {hint}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isOn}
+          aria-label="Notifications in this browser"
+          disabled={busy || isBlocked}
+          onClick={toggle}
+          className={cn(
+            "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            isOn ? "bg-primary" : "bg-muted-foreground/30",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-background shadow transition-transform",
+              isOn && "translate-x-4",
+            )}
+          />
+        </button>
       </div>
     </div>
   );

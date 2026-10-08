@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { resolveAvatarUrl } from "@/lib/utils";
 import { showNotification } from "@/lib/notifications";
+import { useBrowserNotificationsOn } from "./useBrowserNotifications";
 
 const MAX_BODY_LENGTH = 120;
 
@@ -25,7 +26,9 @@ function notify(options) {
 // Shows a browser notification for new messages and for being added to a
 // chat/group, but only while the app is in the background.
 export function useChatNotifications({ socket, user }) {
-  const enabled = user?.notificationSettings?.enabled ?? true;
+  const browserOn = useBrowserNotificationsOn();
+  const accountEnabled = user?.notificationSettings?.enabled ?? true;
+  const enabled = accountEnabled && browserOn;
   const showPreview = user?.notificationSettings?.showPreview ?? true;
 
   useEffect(() => {

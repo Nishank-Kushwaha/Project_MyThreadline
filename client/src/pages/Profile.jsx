@@ -29,10 +29,6 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
-import {
-  getNotificationPermission,
-  requestNotificationPermission,
-} from "@/lib/notifications";
 import { subscribeToPush } from "@/lib/push";
 import ThemePicker from "@/components/ui/ThemePicker";
 
@@ -187,16 +183,6 @@ export default function Profile() {
   const handleNotificationToggle = async (key) => {
     const previous = notificationSettings;
     const next = { ...previous, [key]: !previous[key] };
-
-    // Turning notifications on: make sure the browser is allowed to show them.
-    // Asked first, straight from the click, because browsers only honour the
-    // permission prompt right after a user gesture.
-    if (key === "enabled" && next.enabled) {
-      if (getNotificationPermission() === "default") {
-        await requestNotificationPermission();
-      }
-      subscribeToPush(); // no-op unless permission is granted
-    }
 
     setNotificationStatus({ error: "", loading: true });
     updateUser({ notificationSettings: next }); // instant feedback
@@ -369,7 +355,7 @@ export default function Profile() {
                       ) : (
                         <BellOff className="mr-1.5 h-4 w-4" />
                       )}
-                      Notifications
+                      Notifications (all devices)
                     </span>
                     <span
                       className={cn(
@@ -414,14 +400,6 @@ export default function Profile() {
                     </span>
                   </Button>
                 </div>
-
-                {notificationSettings.enabled &&
-                  getNotificationPermission() === "denied" && (
-                    <p className="text-xs text-muted-foreground">
-                      Your browser is blocking notifications for this site.
-                      Allow them in the browser's site settings.
-                    </p>
-                  )}
 
                 {notificationStatus.error && (
                   <p role="alert" className="text-sm text-destructive">

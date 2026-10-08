@@ -3,7 +3,10 @@ import {
   subscribePushRequest,
   unsubscribePushRequest,
 } from "@/api/pushApi";
-import { getNotificationPermission } from "@/lib/notifications";
+import {
+  getNotificationPermission,
+  isBrowserNotificationsOn,
+} from "@/lib/notifications";
 
 export function isPushSupported() {
   return (
@@ -42,8 +45,18 @@ export function subscribeToPush() {
 
   inFlight = (async () => {
     try {
-      if (!isPushSupported()) return false;
-      if (getNotificationPermission() !== "granted") return false;
+      if (!isPushSupported()) {
+        log("skipped: push is not supported in this browser");
+        return false;
+      }
+      if (getNotificationPermission() !== "granted") {
+        log("skipped: notifications are not granted");
+        return false;
+      }
+      if (!isBrowserNotificationsOn()) {
+        log("skipped: notifications are switched off in this browser");
+        return false;
+      }
 
       const { data } = await getPushPublicKeyRequest();
       const key = urlBase64ToUint8Array(data.publicKey);
