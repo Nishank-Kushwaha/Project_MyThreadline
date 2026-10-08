@@ -5,7 +5,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { setAccessToken } from "@/api/axios";
+import { setAccessToken, setSessionExpiredHandler } from "@/api/axios";
 import {
   registerRequest,
   loginRequest,
@@ -36,6 +36,13 @@ export function AuthProvider({ children }) {
         setIsLoading(false);
       }
     })();
+  }, []);
+
+  // If the session can't be renewed any more, drop the user so the app
+  // returns to the login page instead of showing endless errors.
+  useEffect(() => {
+    setSessionExpiredHandler(() => setUser(null));
+    return () => setSessionExpiredHandler(null);
   }, []);
 
   const register = useCallback(async (payload) => {
