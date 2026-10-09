@@ -1,7 +1,15 @@
 import User from "../../models/User.js";
 import { sendToUser } from "./push.service.js";
 
+// The maximum length of a push notification body. Longer text is truncated with an ellipsis.
 const MAX_BODY_LENGTH = 120;
+
+// How long the server waits for a client to confirm a message before assuming
+// its tab is frozen or suspended and sending a push instead.
+const ACK_TIMEOUT_MS = 5000;
+
+// "userId:messageId" -> timer. In memory, which is fine for one server instance.
+const pendingAcks = new Map();
 
 // The service worker can only load absolute image URLs.
 function avatarFor(url) {
@@ -38,6 +46,31 @@ async function isUserOnline(io, userId) {
   return sockets.length > 0;
 }
 
+// For users who ARE connected: push anyway unless their client confirms it
+// received the message in time (see acknowledgeMessage).
+function scheduleFallbackPush({ room, message, recipientIds }) {
+  for (const userId of recipientIds) {
+    const key = `${userId}:${message._id}`;
+
+    const timer = setTimeout(() => {
+      pendingAcks.delete(key);
+      pushNewMessage({ room, message, recipientIds: [userId] });
+    }, ACK_TIMEOUT_MS);
+
+    pendingAcks.set(key, timer);
+  }
+}
+
+function acknowledgeMessage(userId, messageId) {
+  const key = `${userId}:${messageId}`;
+
+  const timer = pendingAcks.get(key);
+  if (!timer) return;
+
+  clearTimeout(timer);
+  pendingAcks.delete(key);
+}
+
 // A new chat message. `recipientIds` must already be limited to people with no
 // live connection (message:send knows this).
 async function pushNewMessage({ room, message, recipientIds }) {
@@ -63,7 +96,10 @@ async function pushNewMessage({ room, message, recipientIds }) {
             isGroup ? room.groupAvatarUrl : message.sender.avatarUrl,
           ),
           tag: `room:${room._id}`,
-          data: { roomId: room._id.toString() },
+          data: {
+            roomId: room._id.toString(),
+            messageId: message._id.toString(),
+          },
         });
       }),
     );
@@ -100,4 +136,9 @@ async function pushRoomAdded(io, { userId, room }) {
   }
 }
 
-export { pushNewMessage, pushRoomAdded };
+export {
+  pushNewMessage,
+  pushRoomAdded,
+  scheduleFallbackPush,
+  acknowledgeMessage,
+};

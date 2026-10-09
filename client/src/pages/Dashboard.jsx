@@ -244,13 +244,26 @@ export default function Dashboard() {
 
   // This handles a notification click when no tab was open, where the service worker opens /?room=<id>
   useEffect(() => {
-    listRoomsRequest().then(({ data }) => {
-      setRooms(data.rooms);
+    // Read BEFORE fetching: in dev, StrictMode runs this effect twice, and both
+    // runs must see the same value.
+    const openRoomId = new URLSearchParams(window.location.search).get("room");
 
-      // Opened from a notification click with no app tab open: /?room=<id>
-      const roomId = new URLSearchParams(window.location.search).get("room");
-      if (roomId) {
-        if (data.rooms.some((r) => r.id === roomId)) handleSelectRoom(roomId);
+    listRoomsRequest().then(({ data }) => {
+      // The room being opened is about to be seen, so it never shows a badge.
+      // It's cleared in the same update that stores the list, so a later
+      // response can't bring the old count back.
+      setRooms(
+        data.rooms.map((room) =>
+          room.id === openRoomId ? { ...room, unreadCount: 0 } : room,
+        ),
+      );
+
+      if (openRoomId && data.rooms.some((r) => r.id === openRoomId)) {
+        setActiveRoomId(openRoomId);
+        setIsSidebarOpen(false);
+      }
+
+      if (openRoomId) {
         window.history.replaceState(null, "", window.location.pathname);
       }
     });
@@ -259,6 +272,21 @@ export default function Dashboard() {
   useEffect(() => {
     setIsMembersOpen(false);
   }, [activeRoomId]);
+
+  // The room that's open never has unread messages. However a stale count got
+  // there (a late room-list response, a replaced room object), clear it and
+  // tell the server.
+  useEffect(() => {
+    if (!activeRoomId) return;
+
+    const room = rooms.find((r) => r.id === activeRoomId);
+    if (!room || room.unreadCount === 0) return;
+
+    setRooms((prev) =>
+      prev.map((r) => (r.id === activeRoomId ? { ...r, unreadCount: 0 } : r)),
+    );
+    socket?.emit("message:seen", { roomId: activeRoomId });
+  }, [rooms, activeRoomId, socket]);
 
   const handleSelectRoom = (roomId) => {
     setActiveRoomId(roomId);

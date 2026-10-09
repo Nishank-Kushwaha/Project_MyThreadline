@@ -31,6 +31,21 @@ export function useChatNotifications({ socket, user }) {
   const enabled = accountEnabled && browserOn;
   const showPreview = user?.notificationSettings?.showPreview ?? true;
 
+  // Confirms to the server that this page received each message. A frozen or
+  // suspended tab can't, and that silence is what makes the server send a push.
+  useEffect(() => {
+    if (!socket || !user?.id) return;
+
+    const handleReceived = ({ message }) => {
+      if (message.sender._id !== user.id) {
+        socket.emit("message:handled", { messageId: message._id });
+      }
+    };
+
+    socket.on("message:new", handleReceived);
+    return () => socket.off("message:new", handleReceived);
+  }, [socket, user?.id]);
+
   useEffect(() => {
     if (!socket || !user?.id || !enabled) return;
 
@@ -51,7 +66,7 @@ export function useChatNotifications({ socket, user }) {
             isGroup ? room.avatarUrl : message.sender.avatarUrl,
           ) || undefined,
         tag: `room:${roomId}`,
-        data: { roomId },
+        data: { roomId, messageId: message._id },
       });
     };
 

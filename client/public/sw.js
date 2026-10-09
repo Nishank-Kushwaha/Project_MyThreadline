@@ -35,12 +35,20 @@ self.addEventListener("push", (event) => {
 
       if (isLookingAtApp) return;
 
+      const existing = await self.registration.getNotifications({
+        tag: payload.tag,
+      });
+      const alreadyShown = existing.some(
+        (n) =>
+          n.data?.messageId && n.data.messageId === payload.data?.messageId,
+      );
+
       await self.registration.showNotification(payload.title || "Threadline", {
         body: payload.body,
         icon: payload.icon,
         tag: payload.tag,
         data: payload.data,
-        renotify: Boolean(payload.tag),
+        renotify: Boolean(payload.tag) && !alreadyShown,
       });
     })(),
   );

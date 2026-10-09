@@ -38,6 +38,15 @@ export async function showNotification({ title, body, icon, tag, data }) {
 
   const registration = await navigator.serviceWorker.ready;
 
+  // Already on screen for this exact message (for example a push that arrived
+  // while this tab was frozen)? Don't show it twice.
+  if (tag && data?.messageId) {
+    const existing = await registration.getNotifications({ tag });
+    if (existing.some((n) => n.data?.messageId === data.messageId)) {
+      return false;
+    }
+  }
+
   await registration.showNotification(title, {
     body,
     icon,

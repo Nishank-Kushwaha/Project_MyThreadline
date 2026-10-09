@@ -1,7 +1,11 @@
 import Message from "../../models/Message.js";
 import Room from "../../models/Room.js";
 import ApiError from "../../utils/ApiError.js";
-import { pushNewMessage } from "../../modules/push/push.notifications.js";
+import {
+  pushNewMessage,
+  scheduleFallbackPush,
+  acknowledgeMessage,
+} from "../../modules/push/push.notifications.js";
 
 // Matches WhatsApp's own edit window — long enough to fix a typo, short
 // enough that an edit can't quietly rewrite history long after the fact.
@@ -77,6 +81,11 @@ function registerMessageHandlers(io, socket) {
       // the list of members who are online right now.
       const offlineIds = otherIds.filter((id) => !deliveredTo.includes(id));
       pushNewMessage({ room, message, recipientIds: offlineIds });
+
+      // Online users get the message over the socket, but a frozen or
+      // suspended tab can't act on it. Each client confirms with
+      // "message:handled"; if that doesn't arrive in time, push instead.
+      scheduleFallbackPush({ room, message, recipientIds: deliveredTo });
     } catch (err) {
       callback?.({ success: false, message: err.message });
     }
@@ -123,6 +132,12 @@ function registerMessageHandlers(io, socket) {
     } catch (err) {
       console.error("[socket] message:seen failed:", err.message);
     }
+  });
+
+  // This client's page received a message and acted on it. Cancels the
+  // fallback push scheduled in message:send.
+  socket.on("message:handled", ({ messageId } = {}) => {
+    if (messageId) acknowledgeMessage(socket.userId, messageId);
   });
 
   // One reaction per user per message: same emoji tapped again -> remove
