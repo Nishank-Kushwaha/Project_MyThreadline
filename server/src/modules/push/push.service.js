@@ -60,6 +60,16 @@ async function saveSubscription(userId, subscription) {
   }
 
   if (!isAllowedEndpoint(endpoint)) {
+    // Only the host is logged: the full endpoint is a private URL that anyone
+    // holding it could push to.
+    let host = "invalid URL";
+    try {
+      host = new URL(endpoint).hostname;
+    } catch {
+      // keep "invalid URL"
+    }
+
+    console.warn("[push] rejected unsupported push host:", host);
     throw new ApiError(400, "Unsupported push service");
   }
 
