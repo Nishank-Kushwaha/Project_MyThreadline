@@ -1,11 +1,13 @@
 import React, { useState } from "react";
-import { Bell, BellOff } from "lucide-react";
+import { Bell, BellOff, Share } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 import {
   getNotificationPermission,
   requestNotificationPermission,
   setBrowserNotificationsOn,
+  isIOS,
+  isStandalone,
 } from "@/lib/notifications";
 import { subscribeToPush, unsubscribeFromPush } from "@/lib/push";
 import { useBrowserNotificationsOn } from "./useBrowserNotifications";
@@ -18,7 +20,29 @@ export function NotificationBanner() {
 
   const accountEnabled = user?.notificationSettings?.enabled ?? true;
 
-  if (permission === "unsupported") return null;
+  if (permission === "unsupported") {
+    // iPhone/iPad Safari only offers notifications to apps installed to the
+    // Home Screen, so explain how instead of showing nothing.
+    if (isIOS() && !isStandalone()) {
+      return (
+        <div className="px-4 pb-3">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+            <Share className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <p className="text-xs font-medium leading-tight">
+                Install to get notifications
+              </p>
+              <p className="text-[11px] leading-tight text-muted-foreground">
+                Tap Share, then Add to Home Screen
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  }
 
   const isBlocked = permission === "denied";
   const isOn = permission === "granted" && browserOn;

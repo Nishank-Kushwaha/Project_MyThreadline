@@ -33,7 +33,14 @@ self.addEventListener("push", (event) => {
         (w) => w.visibilityState === "visible" && w.focused,
       );
 
-      if (isLookingAtApp) return;
+      // Chrome lets us skip the notification while the app is on screen. Safari
+      // (including iPhone) does not allow silent pushes, so always show there.
+      const ua = self.navigator.userAgent;
+      const isSafari =
+        /iPhone|iPad|iPod/.test(ua) ||
+        (/Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/.test(ua));
+
+      if (isLookingAtApp && !isSafari) return;
 
       const existing = await self.registration.getNotifications({
         tag: payload.tag,

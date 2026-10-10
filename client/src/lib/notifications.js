@@ -97,3 +97,17 @@ export function getDeviceId() {
     return fallbackDeviceId;
   }
 }
+
+export function isIOS() {
+  const iPadOnMac =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || iPadOnMac;
+}
+
+// True when the app was launched from the Home Screen / installed.
+export function isStandalone() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true
+  );
+}
