@@ -2,8 +2,7 @@ import Message from "../../models/Message.js";
 import Room from "../../models/Room.js";
 import ApiError from "../../utils/ApiError.js";
 import {
-  pushNewMessage,
-  scheduleFallbackPush,
+  notifyAboutMessage,
   acknowledgeMessage,
 } from "../../modules/push/push.notifications.js";
 
@@ -76,16 +75,10 @@ function registerMessageHandlers(io, socket) {
 
       callback?.({ success: true, message });
 
-      // Push to members with no live connection. Not awaited: a slow push
-      // service must never delay the message itself. `deliveredTo` is exactly
-      // the list of members who are online right now.
-      const offlineIds = otherIds.filter((id) => !deliveredTo.includes(id));
-      pushNewMessage({ room, message, recipientIds: offlineIds });
-
-      // Online users get the message over the socket, but a frozen or
-      // suspended tab can't act on it. Each client confirms with
-      // "message:handled"; if that doesn't arrive in time, push instead.
-      scheduleFallbackPush({ room, message, recipientIds: deliveredTo });
+      // Per recipient device: push right away if the device is offline, or if
+      // it's connected but its page doesn't confirm in time. Not awaited, so a
+      // slow push service never delays the message itself.
+      notifyAboutMessage(io, { room, message, recipientIds: otherIds });
     } catch (err) {
       callback?.({ success: false, message: err.message });
     }
@@ -137,7 +130,9 @@ function registerMessageHandlers(io, socket) {
   // This client's page received a message and acted on it. Cancels the
   // fallback push scheduled in message:send.
   socket.on("message:handled", ({ messageId } = {}) => {
-    if (messageId) acknowledgeMessage(socket.userId, messageId);
+    if (messageId) {
+      acknowledgeMessage(socket.userId, socket.data.deviceId, messageId);
+    }
   });
 
   // One reaction per user per message: same emoji tapped again -> remove

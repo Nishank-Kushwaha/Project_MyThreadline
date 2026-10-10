@@ -1,15 +1,24 @@
 import User from "../../models/User.js";
-import { sendToUser } from "./push.service.js";
+import { sendToUser, getSubscribedDeviceIds } from "./push.service.js";
 
-// The maximum length of a push notification body. Longer text is truncated with an ellipsis.
+// Longer text is truncated with an ellipsis.
 const MAX_BODY_LENGTH = 120;
 
-// How long the server waits for a client to confirm a message before assuming
-// its tab is frozen or suspended and sending a push instead.
+// How long the server waits for a device to confirm a message before assuming
+// its tab is frozen or suspended and sending a push to that device instead.
 const ACK_TIMEOUT_MS = 5000;
 
-// "userId:messageId" -> timer. In memory, which is fine for one server instance.
+// "userId:deviceId:messageId" -> timer. In memory, which is fine for one
+// server instance.
 const pendingAcks = new Map();
+
+// Confirmations that arrived before their timer existed (the server does a
+// couple of async lookups before scheduling, and a fast page can reply in that
+// gap). Remembered briefly so scheduleFallbackPush can honour them.
+const earlyAcks = new Map(); // key -> expiry timer
+
+const ackKey = (userId, deviceId, messageId) =>
+  `${userId}:${deviceId ?? "none"}:${messageId}`;
 
 // The service worker can only load absolute image URLs.
 function avatarFor(url) {
@@ -22,7 +31,7 @@ function trimText(text = "") {
     : text;
 }
 
-// Phase 6 adds these fields to the user. Until then everyone defaults to on.
+// Missing settings default to on.
 async function getPrefsFor(userIds) {
   const users = await User.find({ _id: { $in: userIds } })
     .select("notificationSettings")
@@ -46,34 +55,54 @@ async function isUserOnline(io, userId) {
   return sockets.length > 0;
 }
 
-// For users who ARE connected: push anyway unless their client confirms it
-// received the message in time (see acknowledgeMessage).
-function scheduleFallbackPush({ room, message, recipientIds }) {
-  for (const userId of recipientIds) {
-    const key = `${userId}:${message._id}`;
+// For a device that IS connected: push to it anyway unless its page confirms
+// it received the message in time (see acknowledgeMessage).
+function scheduleFallbackPush({ userId, deviceId, room, message }) {
+  const key = ackKey(userId, deviceId, message._id);
 
-    const timer = setTimeout(() => {
-      pendingAcks.delete(key);
-      pushNewMessage({ room, message, recipientIds: [userId] });
-    }, ACK_TIMEOUT_MS);
+  // The page already confirmed while we were still deciding: nothing to wait for.
+  if (earlyAcks.has(key)) {
+    clearTimeout(earlyAcks.get(key));
+    earlyAcks.delete(key);
+    return;
+  }
 
-    pendingAcks.set(key, timer);
+  const timer = setTimeout(() => {
+    pendingAcks.delete(key);
+    pushNewMessage({
+      room,
+      message,
+      recipientIds: [userId],
+      deviceIds: [deviceId],
+    });
+  }, ACK_TIMEOUT_MS);
+
+  pendingAcks.set(key, timer);
+}
+
+// Only the owner can add or update their own subscription.
+function acknowledgeMessage(userId, deviceId, messageId) {
+  const key = ackKey(userId, deviceId, messageId);
+  const timer = pendingAcks.get(key);
+
+  if (timer) {
+    clearTimeout(timer);
+    pendingAcks.delete(key);
+    return;
+  }
+
+  // No timer yet: remember the confirmation briefly.
+  if (!earlyAcks.has(key)) {
+    earlyAcks.set(
+      key,
+      setTimeout(() => earlyAcks.delete(key), ACK_TIMEOUT_MS * 2),
+    );
   }
 }
 
-function acknowledgeMessage(userId, messageId) {
-  const key = `${userId}:${messageId}`;
-
-  const timer = pendingAcks.get(key);
-  if (!timer) return;
-
-  clearTimeout(timer);
-  pendingAcks.delete(key);
-}
-
-// A new chat message. `recipientIds` must already be limited to people with no
-// live connection (message:send knows this).
-async function pushNewMessage({ room, message, recipientIds }) {
+// Sends a chat message push. `deviceIds` limits it to those browsers; leave it
+// out to reach every device the user has subscribed.
+async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
   try {
     if (recipientIds.length === 0) return;
 
@@ -89,22 +118,69 @@ async function pushNewMessage({ room, message, recipientIds }) {
         // The sender's name always shows; the text only when previews are on.
         const text = showPreview ? trimText(message.text) : "New message";
 
-        await sendToUser(userId, {
-          title: isGroup ? room.name : senderName,
-          body: isGroup ? `${senderName}: ${text}` : text,
-          icon: avatarFor(
-            isGroup ? room.groupAvatarUrl : message.sender.avatarUrl,
-          ),
-          tag: `room:${room._id}`,
-          data: {
-            roomId: room._id.toString(),
-            messageId: message._id.toString(),
+        await sendToUser(
+          userId,
+          {
+            title: isGroup ? room.name : senderName,
+            body: isGroup ? `${senderName}: ${text}` : text,
+            icon: avatarFor(
+              isGroup ? room.groupAvatarUrl : message.sender.avatarUrl,
+            ),
+            tag: `room:${room._id}`,
+            data: {
+              roomId: room._id.toString(),
+              messageId: message._id.toString(),
+            },
           },
-        });
+          { deviceIds },
+        );
       }),
     );
   } catch (err) {
     console.error("[push] pushNewMessage failed:", err.message);
+  }
+}
+
+// Decides, per recipient DEVICE, how a new message reaches them:
+//  - device has no live connection  -> push right away
+//  - device is connected            -> wait for its page to confirm; push
+//                                      only if that doesn't happen in time
+// Never throws, so callers can fire it without await.
+async function notifyAboutMessage(io, { room, message, recipientIds }) {
+  try {
+    await Promise.all(
+      recipientIds.map(async (userId) => {
+        const [sockets, subscribedDevices] = await Promise.all([
+          io.in(`user:${userId}`).fetchSockets(),
+          getSubscribedDeviceIds(userId),
+        ]);
+
+        const connected = new Set(
+          sockets.map((s) => s.data.deviceId).filter(Boolean),
+        );
+
+        const offlineDevices = [];
+
+        for (const deviceId of new Set(subscribedDevices)) {
+          if (deviceId && connected.has(deviceId)) {
+            scheduleFallbackPush({ userId, deviceId, room, message });
+          } else {
+            offlineDevices.push(deviceId);
+          }
+        }
+
+        if (offlineDevices.length > 0) {
+          await pushNewMessage({
+            room,
+            message,
+            recipientIds: [userId],
+            deviceIds: offlineDevices,
+          });
+        }
+      }),
+    );
+  } catch (err) {
+    console.error("[push] notifyAboutMessage failed:", err.message);
   }
 }
 
@@ -136,9 +212,4 @@ async function pushRoomAdded(io, { userId, room }) {
   }
 }
 
-export {
-  pushNewMessage,
-  pushRoomAdded,
-  scheduleFallbackPush,
-  acknowledgeMessage,
-};
+export { notifyAboutMessage, pushRoomAdded, acknowledgeMessage };

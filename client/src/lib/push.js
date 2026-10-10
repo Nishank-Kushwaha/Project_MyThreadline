@@ -5,6 +5,7 @@ import {
 } from "@/api/pushApi";
 import {
   getNotificationPermission,
+  getDeviceId,
   isBrowserNotificationsOn,
 } from "@/lib/notifications";
 
@@ -76,7 +77,7 @@ export function subscribeToPush() {
         });
       }
 
-      await subscribePushRequest(subscription.toJSON());
+      await subscribePushRequest(subscription.toJSON(), getDeviceId());
       return true;
     } catch (err) {
       console.error("[push] couldn't subscribe:", err.message);

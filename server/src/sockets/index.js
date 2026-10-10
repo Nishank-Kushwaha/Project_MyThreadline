@@ -24,6 +24,11 @@ function initSocket(server) {
     // Personal channel: lets the server push to ONE user across all their tabs.
     socket.join(`user:${socket.userId}`);
 
+    // Which browser this connection belongs to (sent by the client).
+    const deviceId = socket.handshake.auth?.deviceId;
+    socket.data.deviceId =
+      typeof deviceId === "string" && deviceId.length <= 100 ? deviceId : null;
+
     // Register listeners FIRST, synchronously, so an early client event
     // can't arrive before its handler exists.
     registerRoomHandlers(socket);

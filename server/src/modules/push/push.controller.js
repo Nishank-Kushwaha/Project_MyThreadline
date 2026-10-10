@@ -14,7 +14,11 @@ async function getPublicKey(req, res, next) {
 
 async function subscribe(req, res, next) {
   try {
-    await pushService.saveSubscription(req.userId, req.body.subscription);
+    await pushService.saveSubscription(
+      req.userId,
+      req.body.subscription,
+      req.body.deviceId,
+    );
 
     res.status(201).json({
       success: true,

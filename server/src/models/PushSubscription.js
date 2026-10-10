@@ -14,6 +14,7 @@ const pushSubscriptionSchema = new Schema(
       index: true,
     },
     endpoint: { type: String, required: true, unique: true },
+    deviceId: { type: String, default: null, index: true },
     keys: {
       p256dh: { type: String, required: true },
       auth: { type: String, required: true },

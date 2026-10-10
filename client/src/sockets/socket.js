@@ -1,5 +1,6 @@
 import { io } from "socket.io-client";
 import { getAccessToken, refreshAccessToken } from "@/api/axios";
+import { getDeviceId } from "@/lib/notifications";
 
 // One socket for the whole app; components get it through SocketContext.
 let socket = null;
@@ -11,7 +12,11 @@ export function connectSocket(accessToken, serverOrigin) {
   socket = io(serverOrigin, {
     // A function, so every connect AND reconnect sends the CURRENT token, not
     // the one from the very first connection.
-    auth: (callback) => callback({ token: getAccessToken() ?? accessToken }),
+    auth: (callback) =>
+      callback({
+        token: getAccessToken() ?? accessToken,
+        deviceId: getDeviceId(),
+      }),
   });
 
   // The server's auth check rejected us (an expired token). socket.io does not

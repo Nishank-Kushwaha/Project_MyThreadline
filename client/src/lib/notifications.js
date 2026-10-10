@@ -1,7 +1,11 @@
 // Small wrapper around the browser's notification + service worker APIs.
 
 const BROWSER_FLAG_KEY = "threadline:browser-notifications";
+const DEVICE_ID_KEY = "threadline:device-id";
+
 export const BROWSER_NOTIFICATIONS_EVENT = "threadline:browser-notifications";
+
+let fallbackDeviceId = null;
 
 export function isNotificationSupported() {
   return "Notification" in window && "serviceWorker" in navigator;
@@ -75,4 +79,21 @@ export function setBrowserNotificationsOn(isOn) {
     // storage unavailable: the choice just isn't remembered
   }
   window.dispatchEvent(new Event(BROWSER_NOTIFICATIONS_EVENT));
+}
+
+// A random id for THIS browser. Sent with the socket connection and with the
+// push subscription, so the server can tell which of your devices is online.
+export function getDeviceId() {
+  try {
+    let id = localStorage.getItem(DEVICE_ID_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(DEVICE_ID_KEY, id);
+    }
+    return id;
+  } catch {
+    // storage unavailable: still stable for this page's lifetime
+    fallbackDeviceId ??= crypto.randomUUID();
+    return fallbackDeviceId;
+  }
 }

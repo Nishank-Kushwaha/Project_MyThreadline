@@ -49,8 +49,17 @@ function getPublicKey() {
   return env.vapid.publicKey;
 }
 
+// One entry per subscribed browser (null for rows saved before device ids).
+async function getSubscribedDeviceIds(userId) {
+  const subscriptions = await PushSubscription.find({ userId })
+    .select("deviceId")
+    .lean();
+
+  return subscriptions.map((s) => s.deviceId ?? null);
+}
+
 // Called after login or whenever the browser (re)subscribes.
-async function saveSubscription(userId, subscription) {
+async function saveSubscription(userId, subscription, deviceId) {
   const endpoint = subscription?.endpoint;
   const p256dh = subscription?.keys?.p256dh;
   const auth = subscription?.keys?.auth;
@@ -73,10 +82,18 @@ async function saveSubscription(userId, subscription) {
     throw new ApiError(400, "Unsupported push service");
   }
 
+  // Which browser this is. Optional: older clients don't send one.
+  const cleanDeviceId =
+    typeof deviceId === "string" &&
+    deviceId.length > 0 &&
+    deviceId.length <= 100
+      ? deviceId
+      : null;
+
   // Upsert by endpoint: same browser, new account => the row moves to them.
   await PushSubscription.findOneAndUpdate(
     { endpoint },
-    { userId, keys: { p256dh, auth } },
+    { userId, deviceId: cleanDeviceId, keys: { p256dh, auth } },
     { upsert: true, setDefaultsOnInsert: true },
   );
 }
@@ -89,12 +106,15 @@ async function removeSubscription(userId, endpoint) {
 // Sends one payload to every device the user has subscribed. Subscriptions the
 // push service reports as gone (404/410) are deleted. Never throws on a
 // delivery failure; callers still wrap it in try/catch for database errors.
-async function sendToUser(userId, payload) {
+async function sendToUser(userId, payload, { deviceIds } = {}) {
   const result = { sent: 0, removed: 0, failed: 0 };
 
   if (!isConfigured) return result;
 
-  const subscriptions = await PushSubscription.find({ userId }).lean();
+  const query = { userId };
+  if (deviceIds) query.deviceId = { $in: deviceIds };
+
+  const subscriptions = await PushSubscription.find(query).lean();
   if (subscriptions.length === 0) return result;
 
   const body = JSON.stringify(payload);
@@ -123,4 +143,10 @@ async function sendToUser(userId, payload) {
   return result;
 }
 
-export { getPublicKey, saveSubscription, removeSubscription, sendToUser };
+export {
+  getPublicKey,
+  getSubscribedDeviceIds,
+  saveSubscription,
+  removeSubscription,
+  sendToUser,
+};
