@@ -11,6 +11,7 @@ import authRoutes from "./modules/auth/auth.routes.js";
 import usersRoutes from "./modules/users/users.routes.js";
 import roomsRoutes from "./modules/rooms/rooms.routes.js";
 import pushRoutes from "./modules/push/push.routes.js";
+import keysRoutes from "./modules/keys/keys.routes.js";
 
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 
@@ -35,6 +36,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/rooms", roomsRoutes);
 app.use("/api/push", pushRoutes);
+app.use("/api/keys", keysRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

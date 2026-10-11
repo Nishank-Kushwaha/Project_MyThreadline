@@ -28,9 +28,11 @@ import {
   BellOff,
   Eye,
   EyeOff,
+  ShieldCheck,
 } from "lucide-react";
 import { subscribeToPush } from "@/lib/push";
 import ThemePicker from "@/components/ui/ThemePicker";
+import { EncryptionStatus } from "@/features/e2ee/EncryptionStatus";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
@@ -413,7 +415,25 @@ export default function Profile() {
 
         {/* Settings column */}
         <div className="flex flex-col gap-4 sm:gap-6 lg:col-span-8 lg:h-full lg:min-h-0 xl:col-span-9">
-          <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:shrink-0">
+          <div className="grid gap-4 sm:gap-6 md:grid-cols-3 lg:shrink-0">
+            {/* End-to-end encryption and registered devices */}
+            <Card id="encryption" className="scroll-mt-6">
+              <CardHeader className={HEADER}>
+                <CardTitle className="flex items-center gap-2">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  End-to-end encryption
+                </CardTitle>
+                <CardDescription>
+                  Check this device's encryption status and manage your
+                  registered devices.
+                </CardDescription>
+              </CardHeader>
+
+              <CardContent className={CONTENT}>
+                <EncryptionStatus />
+              </CardContent>
+            </Card>
+
             {/* Name and Email */}
             <Card id="profile-info" className="scroll-mt-6">
               <CardHeader className={HEADER}>
@@ -542,6 +562,7 @@ export default function Profile() {
               </CardContent>
             </Card>
           </div>
+
           {/* Appearance: card fills the leftover height; only its theme list scrolls */}
           <Card
             id="appearance"

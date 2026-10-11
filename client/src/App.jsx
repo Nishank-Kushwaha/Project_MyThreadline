@@ -7,8 +7,11 @@ import Register from "@/pages/Register";
 import Dashboard from "@/pages/Dashboard";
 import Profile from "@/pages/Profile";
 import OAuthCallback from "@/pages/OAuthCallback";
+
 import { SocketProvider } from "@/context/SocketContext";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { E2EEProvider } from "@/features/e2ee/E2EEContext";
+
 import { NotificationManager } from "@/features/chat/NotificationManager";
 
 export default function App() {
@@ -17,29 +20,31 @@ export default function App() {
       <AuthProvider>
         <ThemeProvider>
           <SocketProvider>
-            <NotificationManager />
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/oauth-callback" element={<OAuthCallback />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/profile"
-                element={
-                  <ProtectedRoute>
-                    <Profile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <E2EEProvider>
+              <NotificationManager />
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/oauth-callback" element={<OAuthCallback />} />
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute>
+                      <Dashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/profile"
+                  element={
+                    <ProtectedRoute>
+                      <Profile />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </E2EEProvider>
           </SocketProvider>
         </ThemeProvider>
       </AuthProvider>
