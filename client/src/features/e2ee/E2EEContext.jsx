@@ -11,6 +11,8 @@ import {
   fingerprintOf,
   isE2EESupported,
 } from "@/lib/e2ee/deviceKey";
+import { clearIdentityCache } from "@/lib/e2ee/identity";
+import { clearKeyDirectoryCache } from "@/lib/e2ee/directory";
 
 const E2EEContext = createContext(null);
 
@@ -35,6 +37,9 @@ export function E2EEProvider({ children }) {
       return;
     }
 
+    clearKeyDirectoryCache();
+    clearIdentityCache();
+
     if (!isE2EESupported()) {
       setState({ ...IDLE, status: "unsupported" });
       return;
@@ -45,6 +50,7 @@ export function E2EEProvider({ children }) {
 
     ensureDeviceKey(user.id)
       .then(async ({ deviceId, publicKey }) => {
+        clearIdentityCache(); // reload the key record that setup just wrote
         const fingerprint = await fingerprintOf(publicKey);
         if (!cancelled) {
           setState({

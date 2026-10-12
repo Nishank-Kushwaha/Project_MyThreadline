@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -9,15 +10,38 @@ import { Menu, Users } from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
-import { formatLastSeen, resolveAvatarUrl } from "@/lib/utils";
+import { formatLastSeen } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
+import { EncryptionNotice } from "./EncryptionNotice";
+import { useE2EE } from "@/features/e2ee/E2EEContext";
+import { getUserDeviceKeys } from "@/lib/e2ee/directory";
+import {
+  buildOutgoingMessage,
+  decryptMessage,
+  decryptMessages,
+} from "@/lib/e2ee/messages";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence
 const TYPING_REFRESH_MS = 2500; // while I keep typing, re-announce this often
 const TYPING_EXPIRE_MS = 4000; // safety net: hide someone else's indicator if "stop" never arrives
 
 const PAGE_SIZE = 30; // how many messages to fetch at once
+
+// Decrypting is async, so two messages that arrive close together can finish
+// out of order. Insert by time instead of always appending.
+function insertInOrder(list, message) {
+  if (list.some((m) => m._id === message._id)) return list;
+
+  const time = new Date(message.createdAt).getTime();
+  let index = list.length;
+
+  while (index > 0 && new Date(list[index - 1].createdAt).getTime() > time) {
+    index -= 1;
+  }
+
+  return [...list.slice(0, index), message, ...list.slice(index)];
+}
 
 export function ChatWindow({
   room,
@@ -26,9 +50,14 @@ export function ChatWindow({
   onOpenSidebar,
   onOpenMembers,
 }) {
+  const e2ee = useE2EE();
+
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState({}); // { [userId]: name }
+  const [sendError, setSendError] = useState("");
+  // "off" (groups) | "checking" | "active" | "pending"
+  const [encryption, setEncryption] = useState("checking");
 
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -57,8 +86,54 @@ export function ChatWindow({
     });
   }, []);
 
+  // ---------- 0) Is this chat encrypted (or about to be)? ----------
+  useEffect(() => {
+    if (room.type !== "private") {
+      setEncryption("off");
+      return;
+    }
+
+    if (room.encrypted) {
+      setEncryption("active");
+      return;
+    }
+
+    let cancelled = false;
+    setEncryption("checking");
+
+    Promise.all([
+      getUserDeviceKeys(currentUser.id),
+      getUserDeviceKeys(room.otherUserId),
+    ])
+      .then(([mine, theirs]) => {
+        if (!cancelled) {
+          setEncryption(
+            mine.length > 0 && theirs.length > 0 ? "active" : "pending",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setEncryption("pending");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    room.id,
+    room.type,
+    room.encrypted,
+    room.otherUserId,
+    currentUser.id,
+    e2ee.status,
+  ]);
+
   // ---------- 1) History over REST ----------
   useEffect(() => {
+    // Wait for this device's key to be ready, or encrypted messages would all
+    // show as undecryptable.
+    if (e2ee.status === "idle" || e2ee.status === "loading") return;
+
     let cancelled = false;
     setIsLoading(true);
     setMessages([]);
@@ -67,10 +142,15 @@ export function ChatWindow({
     loadingMoreRef.current = false;
 
     getRoomMessagesRequest(room.id, { limit: PAGE_SIZE })
-      .then(({ data }) => {
+      .then(async ({ data }) => {
+        const readable = await decryptMessages(data.messages, {
+          roomId: room.id,
+          userId: currentUser.id,
+        });
+
         if (cancelled) return;
         scrollAction.current = "initial";
-        setMessages(data.messages);
+        setMessages(readable);
         setHasMore(data.messages.length === PAGE_SIZE);
         setIsLoading(false); // same tick as setMessages so the scroll effect sees real content
       })
@@ -81,7 +161,7 @@ export function ChatWindow({
     return () => {
       cancelled = true;
     };
-  }, [room.id]);
+  }, [room.id, e2ee.status, currentUser.id]);
 
   // ---------- 2) Load older messages on scroll ----------
   const loadOlder = useCallback(async () => {
@@ -98,12 +178,18 @@ export function ChatWindow({
       });
       if (activeRoomRef.current !== requestedRoom) return; // user switched rooms
 
+      const readable = await decryptMessages(data.messages, {
+        roomId: room.id,
+        userId: currentUser.id,
+      });
+      if (activeRoomRef.current !== requestedRoom) return;
+
       prevScrollHeight.current = scrollRef.current.scrollHeight;
       scrollAction.current = "prepend";
 
       setMessages((prev) => {
         const existing = new Set(prev.map((m) => m._id));
-        return [...data.messages.filter((m) => !existing.has(m._id)), ...prev];
+        return [...readable.filter((m) => !existing.has(m._id)), ...prev];
       });
       setHasMore(data.messages.length === PAGE_SIZE);
     } catch (err) {
@@ -112,7 +198,7 @@ export function ChatWindow({
       loadingMoreRef.current = false;
       setIsLoadingMore(false);
     }
-  }, [hasMore, messages, room.id]);
+  }, [hasMore, messages, room.id, currentUser.id]);
 
   // ---------- 3) Live messages + receipts ----------
   useEffect(() => {
@@ -142,9 +228,15 @@ export function ChatWindow({
         );
       };
 
-    const handleNewMessage = ({ roomId, message }) => {
+    const handleNewMessage = async ({ roomId, message }) => {
       if (roomId !== room.id) return;
-      setMessages((prev) => [...prev, message]);
+
+      const readable = await decryptMessage(message, {
+        roomId: room.id,
+        userId: currentUser.id,
+      });
+
+      setMessages((prev) => insertInOrder(prev, readable));
       removeTyping(message.sender._id); // they sent it, so they're no longer "typing"
       socket.emit("message:seen", { roomId: room.id }); // still open => still seen
     };
@@ -173,7 +265,7 @@ export function ChatWindow({
       setMessages((prev) =>
         prev.map((m) =>
           m._id === messageId
-            ? { ...m, text: "", reactions: [], deletedAt }
+            ? { ...m, text: "", reactions: [], e2ee: undefined, deletedAt }
             : m,
         ),
       );
@@ -182,9 +274,7 @@ export function ChatWindow({
     // arriving both live and in a history fetch.
     const handleSystemMessage = ({ roomId, message }) => {
       if (roomId !== room.id) return;
-      setMessages((prev) =>
-        prev.some((m) => m._id === message._id) ? prev : [...prev, message],
-      );
+      setMessages((prev) => insertInOrder(prev, message));
     };
 
     socket.on("message:new", handleNewMessage);
@@ -283,12 +373,41 @@ export function ChatWindow({
     idleTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
 
-  const handleSend = (text) => {
-    if (!socket) return;
+  // Returns false when the message wasn't sent, so the input keeps the text.
+  const handleSend = async (text) => {
+    if (!socket) return false;
     stopTyping();
-    socket.emit("message:send", { roomId: room.id, text }, (ack) => {
-      if (!ack?.success) console.error("Message failed to send:", ack?.message);
-    });
+    setSendError("");
+
+    try {
+      const payload = await buildOutgoingMessage({ room, currentUser, text });
+
+      const ack = await new Promise((resolve) => {
+        socket
+          .timeout(10000)
+          .emit(
+            "message:send",
+            { roomId: room.id, ...payload },
+            (err, response) =>
+              resolve(
+                err
+                  ? { success: false, message: "No response from the server." }
+                  : response,
+              ),
+          );
+      });
+
+      if (!ack?.success) {
+        setSendError(ack?.message || "Message failed to send.");
+        return false;
+      }
+
+      return true;
+    } catch (err) {
+      console.error("Message failed to send:", err);
+      setSendError(err.message || "Couldn't send that message.");
+      return false;
+    }
   };
 
   const handleReact = (messageId, emoji) => {
@@ -320,6 +439,20 @@ export function ChatWindow({
     if (e.currentTarget.scrollTop < 100) loadOlder();
   };
 
+  // The first encrypted message that follows older plaintext ones: a divider
+  // is drawn above it so the old messages are clearly labelled.
+  const encryptionStartsAt = useMemo(() => {
+    let sawPlaintext = false;
+
+    for (const m of messages) {
+      if (m.type === "system") continue;
+      if (!m.encrypted) sawPlaintext = true;
+      else if (sawPlaintext) return m._id;
+    }
+
+    return null;
+  }, [messages]);
+
   // ---------- Header text ----------
   const typingNames = Object.values(typingUsers);
   let typingText = "";
@@ -338,8 +471,6 @@ export function ChatWindow({
     subtitle = <span className="text-primary">Online</span>;
   else subtitle = formatLastSeen(room.lastSeen);
 
-  const avatar = resolveAvatarUrl(room.avatarUrl);
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-border p-4">
@@ -356,22 +487,17 @@ export function ChatWindow({
           className="h-9 w-9 text-xs"
         />
         <div className="min-w-0 flex-1">
-          {" "}
-          <p className="truncate text-sm font-semibold"> {room.name} </p>{" "}
-          <p className="truncate text-xs text-muted-foreground">
-            {" "}
-            {subtitle}{" "}
-          </p>{" "}
-        </div>{" "}
-        {/* Private chats are always exactly 2 people, so there is nothing to manage. */}{" "}
+          <p className="truncate text-sm font-semibold">{room.name}</p>
+          <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+        {/* Private chats are always exactly 2 people, so there is nothing to manage. */}
         {room.type === "group" && (
           <button
             onClick={onOpenMembers}
             className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
             title="Manage members"
           >
-            {" "}
-            <Users className="h-4 w-4" /> {room.memberCount}{" "}
+            <Users className="h-4 w-4" /> {room.memberCount}
           </button>
         )}
       </div>
@@ -381,6 +507,13 @@ export function ChatWindow({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4"
       >
+        {!isLoading && encryption === "active" && (
+          <EncryptionNotice kind="active" name={room.name} />
+        )}
+        {!isLoading && encryption === "pending" && (
+          <EncryptionNotice kind="pending" name={room.name} />
+        )}
+
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading messages…</p>
         ) : messages.length === 0 ? (
@@ -396,22 +529,32 @@ export function ChatWindow({
                 currentUserId={currentUser.id}
               />
             ) : (
-              <MessageBubble
-                key={m._id}
-                message={m}
-                isOwn={m.sender._id === currentUser.id}
-                isGroup={room.type === "group"}
-                recipientCount={recipientCount}
-                currentUserId={currentUser.id}
-                onReact={handleReact}
-                onEdit={handleEditMessage}
-                onDelete={handleDeleteMessage}
-              />
+              <React.Fragment key={m._id}>
+                {m._id === encryptionStartsAt && (
+                  <EncryptionNotice kind="started" name={room.name} />
+                )}
+                <MessageBubble
+                  message={m}
+                  isOwn={m.sender._id === currentUser.id}
+                  isGroup={room.type === "group"}
+                  recipientCount={recipientCount}
+                  currentUserId={currentUser.id}
+                  onReact={handleReact}
+                  onEdit={handleEditMessage}
+                  onDelete={handleDeleteMessage}
+                />
+              </React.Fragment>
             ),
           )
         )}
         <div ref={bottomRef} />
       </div>
+
+      {sendError && (
+        <p role="alert" className="px-4 pb-1 text-xs text-destructive">
+          {sendError}
+        </p>
+      )}
 
       <MessageInput onSend={handleSend} onTyping={handleTyping} />
     </div>

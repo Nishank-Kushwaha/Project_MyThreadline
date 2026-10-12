@@ -2,8 +2,15 @@ import React from "react";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { getSystemText } from "./SystemMessage";
+import { ENCRYPTED_PREVIEW } from "@/lib/e2ee/messages";
 
-export function RoomList({ rooms, activeRoomId, onSelect, currentUserId }) {
+export function RoomList({
+  rooms,
+  activeRoomId,
+  onSelect,
+  currentUserId,
+  previews = {},
+}) {
   if (rooms.length === 0) {
     return (
       <p className="p-4 text-sm text-muted-foreground">
@@ -21,7 +28,9 @@ export function RoomList({ rooms, activeRoomId, onSelect, currentUserId }) {
         const preview =
           (lastMessage?.system &&
             getSystemText(lastMessage.system, currentUserId)) ||
-          lastMessage?.text;
+          (lastMessage?.e2ee
+            ? (previews[lastMessage.messageId] ?? ENCRYPTED_PREVIEW)
+            : lastMessage?.text);
 
         return (
           <li key={room.id}>

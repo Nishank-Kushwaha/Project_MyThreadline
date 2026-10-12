@@ -116,7 +116,11 @@ async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
         if (!enabled) return;
 
         // The sender's name always shows; the text only when previews are on.
-        const text = showPreview ? trimText(message.text) : "New message";
+        // Encrypted messages are unreadable here, so their push is generic.
+        const text =
+          message.encrypted || !showPreview
+            ? "New message"
+            : trimText(message.text);
 
         await sendToUser(
           userId,

@@ -16,40 +16,65 @@ import {
   useNotificationClicks,
   useUnreadTitle,
 } from "@/features/chat/useChatNotifications";
+import { useE2EE } from "@/features/e2ee/E2EEContext";
+import { decryptPreview } from "@/lib/e2ee/messages";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const socket = useSocket();
+  const e2ee = useE2EE();
 
   const [rooms, setRooms] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState(null);
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMembersOpen, setIsMembersOpen] = useState(false);
+  const [previews, setPreviews] = useState({}); // lastMessage id -> decrypted preview text
 
   // Keep the sidebar live for EVERY room (preview, unread badge, ordering).
   useEffect(() => {
     if (!socket) return;
 
-    const handleNewMessage = ({ roomId, message }) => {
+    const handleNewMessage = async ({ roomId, message }) => {
+      // Decrypt BEFORE touching state, so the sidebar never renders the
+      // "🔒 Encrypted message" placeholder for even an instant.
+      if (message.encrypted && message.e2ee) {
+        const previewText = await decryptPreview(
+          { e2ee: message.e2ee, sender: message.sender._id },
+          { roomId, userId: user.id },
+        );
+
+        setPreviews((prev) => ({ ...prev, [message._id]: previewText }));
+      }
+
       setRooms((prev) => {
         const isFromMe = message.sender._id === user.id;
         const isOpen = roomId === activeRoomId;
 
-        const updated = prev.map((room) =>
-          room.id === roomId
-            ? {
-                ...room,
-                lastMessage: {
+        const updated = prev.map((room) => {
+          if (room.id !== roomId) return room;
+
+          // Decrypting takes a moment. If a newer message already became the
+          // preview in the meantime, don't step back to an older one.
+          const isNewest =
+            !room.lastMessage?.createdAt ||
+            new Date(message.createdAt) >= new Date(room.lastMessage.createdAt);
+
+          return {
+            ...room,
+            lastMessage: isNewest
+              ? {
                   messageId: message._id,
                   text: message.text,
                   sender: message.sender._id,
                   createdAt: message.createdAt,
-                },
-                unreadCount: isOpen || isFromMe ? 0 : room.unreadCount + 1,
-              }
-            : room,
-        );
+                  encrypted: message.encrypted,
+                  e2ee: message.e2ee,
+                }
+              : room.lastMessage,
+            unreadCount: isOpen || isFromMe ? 0 : room.unreadCount + 1,
+          };
+        });
 
         const index = updated.findIndex((room) => room.id === roomId);
         if (index > 0) {
@@ -68,7 +93,14 @@ export default function Dashboard() {
         setRooms((prev) =>
           prev.map((room) =>
             room.id === roomId && room.lastMessage?.messageId === messageId
-              ? { ...room, lastMessage: { ...room.lastMessage, text: newText } }
+              ? {
+                  ...room,
+                  lastMessage: {
+                    ...room.lastMessage,
+                    text: newText,
+                    e2ee: undefined,
+                  },
+                }
               : room,
           ),
         );
@@ -288,6 +320,31 @@ export default function Dashboard() {
     socket?.emit("message:seen", { roomId: activeRoomId });
   }, [rooms, activeRoomId, socket]);
 
+  // Decrypt the sidebar preview of rooms whose last message is encrypted. The
+  // server only holds ciphertext, so each browser reads it for itself.
+  useEffect(() => {
+    if (e2ee.status !== "ready" || !user?.id) return;
+
+    const pending = rooms.filter(
+      (room) =>
+        room.lastMessage?.e2ee &&
+        previews[room.lastMessage.messageId] === undefined,
+    );
+    if (pending.length === 0) return;
+
+    Promise.all(
+      pending.map(async (room) => [
+        room.lastMessage.messageId,
+        await decryptPreview(room.lastMessage, {
+          roomId: room.id,
+          userId: user.id,
+        }),
+      ]),
+    ).then((entries) => {
+      setPreviews((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+  }, [rooms, e2ee.status, user?.id, previews]);
+
   const handleSelectRoom = (roomId) => {
     setActiveRoomId(roomId);
     setRooms((prev) =>
@@ -365,6 +422,7 @@ export default function Dashboard() {
           activeRoomId={activeRoomId}
           onSelect={handleSelectRoom}
           currentUserId={user?.id}
+          previews={previews}
         />
 
         <div className="border-t border-border p-3">

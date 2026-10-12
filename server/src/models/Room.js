@@ -6,6 +6,7 @@ const roomSchema = new Schema(
   {
     type: { type: String, enum: ["private", "group"], required: true },
     name: { type: String, trim: true }, // only used for "group" rooms
+    encrypted: { type: Boolean, default: false }, // Set once a private chat switches to end-to-end encryption. One-way: it never goes back to plaintext.
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null }, // only used for "group" rooms
     groupAvatarUrl: { type: String, default: "" },
     groupAvatarPublicId: { type: String, default: "" },
@@ -28,6 +29,8 @@ const roomSchema = new Schema(
       sender: { type: Schema.Types.ObjectId, ref: "User" },
       createdAt: Date,
       system: Schema.Types.Mixed, // only set when the last message is a group event
+      encrypted: Boolean,
+      e2ee: Schema.Types.Mixed, // ciphertext of the last message, for the sidebar preview
     },
   },
   { timestamps: true },

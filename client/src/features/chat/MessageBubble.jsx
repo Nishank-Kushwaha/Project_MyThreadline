@@ -8,6 +8,7 @@ import {
   Trash2,
   X as XIcon,
   MoreVertical,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuickReactBar } from "./QuickReactBar";
@@ -89,6 +90,8 @@ export function MessageBubble({
   const quickBarWrapRef = useRef(null);
 
   const isDeleted = !!message.deletedAt;
+  const undecryptable =
+    message.decrypt === "failed" || message.decrypt === "other-device";
 
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
@@ -367,18 +370,20 @@ export function MessageBubble({
                         }}
                         className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
                       >
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            startEdit();
-                          }}
-                          className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
-                        >
-                          <Pencil className="h-4 w-4" />
-                          <span>Edit message</span>
-                        </button>
+                        {!message.encrypted && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              startEdit();
+                            }}
+                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                          >
+                            <Pencil className="h-4 w-4" />
+                            <span>Edit message</span>
+                          </button>
+                        )}
 
                         <button
                           type="button"
@@ -438,10 +443,25 @@ export function MessageBubble({
               </div>
             ) : (
               <>
-                <p className="whitespace-pre-wrap wrap-break-word text-sm">
-                  {message.text}
-                </p>
+                {undecryptable ? (
+                  <p className="flex items-center gap-1.5 text-sm italic opacity-80">
+                    <Lock className="h-3.5 w-3.5 shrink-0" />
+                    {message.decrypt === "other-device"
+                      ? "Sent before this device was set up, so it can't be read here"
+                      : "Couldn't decrypt this message"}
+                  </p>
+                ) : (
+                  <p className="whitespace-pre-wrap wrap-break-word text-sm">
+                    {message.text}
+                  </p>
+                )}
                 <div className="mt-1 flex items-center justify-end gap-1 text-[10px]">
+                  {message.encrypted && (
+                    <Lock
+                      className="h-3 w-3 opacity-60"
+                      aria-label="End-to-end encrypted"
+                    />
+                  )}
                   {message.editedAt && (
                     <span className="opacity-60">(edited)</span>
                   )}

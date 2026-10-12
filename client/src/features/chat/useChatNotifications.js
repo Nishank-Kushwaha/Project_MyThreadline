@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { resolveAvatarUrl } from "@/lib/utils";
 import { showNotification } from "@/lib/notifications";
 import { useBrowserNotificationsOn } from "./useBrowserNotifications";
+import { decryptMessage } from "@/lib/e2ee/messages";
 
 const MAX_BODY_LENGTH = 120;
 
@@ -49,14 +50,25 @@ export function useChatNotifications({ socket, user }) {
   useEffect(() => {
     if (!socket || !user?.id || !enabled) return;
 
-    const handleNewMessage = ({ roomId, message, room }) => {
+    const handleNewMessage = async ({ roomId, message, room }) => {
       if (message.sender._id === user.id) return;
       if (!isAppInBackground()) return;
 
       const isGroup = room?.type === "group";
 
+      // Encrypted messages are decrypted here, on the device. If that fails or
+      // previews are off, the notification stays generic.
+      let body = message.text;
+
+      if (message.encrypted) {
+        const readable = showPreview
+          ? await decryptMessage(message, { roomId, userId: user.id })
+          : null;
+        body = readable?.decrypt === "ok" ? readable.text : "";
+      }
+
       // The sender's name always shows; the text only when previews are on.
-      const text = showPreview ? trimText(message.text) : "New message";
+      const text = showPreview && body ? trimText(body) : "New message";
 
       notify({
         title: isGroup ? room.name : message.sender.name,

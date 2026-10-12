@@ -5,6 +5,10 @@ import {
   notifyAboutMessage,
   acknowledgeMessage,
 } from "../../modules/push/push.notifications.js";
+import {
+  allMembersHaveDeviceKeys,
+  validateEnvelope,
+} from "../../modules/messages/e2ee.validation.js";
 
 // Matches WhatsApp's own edit window — long enough to fix a typo, short
 // enough that an edit can't quietly rewrite history long after the fact.
@@ -24,16 +28,52 @@ async function getOnlineUserIds(io, userIds) {
 function registerMessageHandlers(io, socket) {
   // Fired when a user sends a message. The server saves it, updates the room's
   // lastMessage, and broadcasts it to everyone in the room (including the sender).
-  socket.on("message:send", async ({ roomId, text }, callback) => {
+  socket.on("message:send", async ({ roomId, text, e2ee }, callback) => {
     try {
-      if (!text || !text.trim())
-        throw new ApiError(400, "Message text is required");
-
       const room = await Room.findOne({
         _id: roomId,
         "members.userId": socket.userId,
       });
       if (!room) throw new ApiError(403, "You are not a member of this room");
+
+      // Private chats are end-to-end encrypted once every member has a
+      // registered device key. From then on plaintext is refused, so a bug or
+      // an old client can't silently downgrade the chat.
+      let envelope = null;
+
+      if (room.type === "private") {
+        const ready = await allMembersHaveDeviceKeys(room);
+
+        if (room.encrypted || ready) {
+          if (!e2ee) {
+            throw new ApiError(
+              400,
+              "This chat is end-to-end encrypted. Reload the app and try again.",
+            );
+          }
+
+          envelope = await validateEnvelope(e2ee, {
+            room,
+            userId: socket.userId,
+            deviceId: socket.data.deviceId,
+          });
+          room.encrypted = true;
+        } else if (e2ee) {
+          throw new ApiError(
+            400,
+            "The other person hasn't set up encryption yet",
+          );
+        }
+      } else if (e2ee) {
+        throw new ApiError(
+          400,
+          "Encryption isn't available in group chats yet",
+        );
+      }
+
+      if (!envelope && (!text || !text.trim())) {
+        throw new ApiError(400, "Message text is required");
+      }
 
       // Recipients who are online right now have received it the instant it's
       // broadcast => "delivered". Offline ones are marked later, when they
@@ -46,7 +86,9 @@ function registerMessageHandlers(io, socket) {
       const message = await Message.create({
         roomId,
         sender: socket.userId,
-        text: text.trim(),
+        encrypted: Boolean(envelope),
+        text: envelope ? "" : text.trim(),
+        ...(envelope && { e2ee: envelope }),
         deliveredTo,
       });
       await message.populate("sender", "name avatarUrl");
@@ -59,6 +101,8 @@ function registerMessageHandlers(io, socket) {
         text: message.text,
         sender: socket.userId,
         createdAt: message.createdAt,
+        encrypted: message.encrypted,
+        e2ee: envelope ?? undefined,
       };
       await room.save();
 
@@ -221,6 +265,12 @@ function registerMessageHandlers(io, socket) {
       });
 
       if (!message) throw new ApiError(404, "Message not found");
+      if (message.encrypted) {
+        throw new ApiError(
+          400,
+          "Editing encrypted messages isn't supported yet",
+        );
+      }
       if (message.sender.toString() !== socket.userId) {
         throw new ApiError(403, "You can only edit your own messages");
       }
@@ -289,6 +339,7 @@ function registerMessageHandlers(io, socket) {
 
       message.text = DELETED_PREVIEW_TEXT;
       message.reactions = [];
+      message.e2ee = undefined; // the ciphertext is removed along with the message
       message.deletedAt = new Date();
 
       await message.save();
@@ -296,6 +347,8 @@ function registerMessageHandlers(io, socket) {
       // Update room's last message preview if necessary
       if (room.lastMessage?.messageId?.toString() === messageId) {
         room.lastMessage.text = DELETED_PREVIEW_TEXT;
+        room.lastMessage.e2ee = undefined;
+        room.lastMessage.encrypted = false;
         await room.save();
       }
 

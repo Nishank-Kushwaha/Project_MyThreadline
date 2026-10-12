@@ -11,7 +11,38 @@ const messageSchema = new Schema(
       index: true,
     },
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true },
-    text: { type: String, required: true, trim: true },
+
+    // Empty for end-to-end encrypted messages: the readable text only ever
+    // exists on the devices.
+    text: {
+      type: String,
+      required: function () {
+        return !this.encrypted;
+      },
+      trim: true,
+      default: "",
+    },
+
+    // True for an end-to-end encrypted message. Its contents are in `e2ee`.
+    encrypted: { type: Boolean, default: false },
+    e2ee: {
+      v: Number,
+      senderDeviceId: String,
+      spk: String, // sender device's public key, as used for this message
+      iv: String,
+      ciphertext: String,
+      // One locked copy of the message key per recipient device.
+      keys: [
+        {
+          _id: false,
+          userId: String,
+          deviceId: String,
+          epk: String,
+          iv: String,
+          wrapped: String,
+        },
+      ],
+    },
 
     // "user" = a normal chat message, "system" = an event like "Carol left".
     // For system messages, `sender` is the person who did the action.

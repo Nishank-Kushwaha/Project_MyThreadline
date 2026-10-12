@@ -40,6 +40,7 @@ function shapeRoom(room, userId) {
     unreadCount: myMembership?.unreadCount || 0,
     memberCount: room.members.length,
     isAdmin: myMembership?.isAdmin || false,
+    encrypted: Boolean(room.encrypted),
   };
 }
 
