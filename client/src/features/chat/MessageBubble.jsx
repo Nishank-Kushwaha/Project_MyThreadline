@@ -72,6 +72,7 @@ export function MessageBubble({
   isGroup,
   recipientCount,
   currentUserId,
+  editable = true,
   onReact,
   onEdit,
   onDelete,
@@ -370,7 +371,7 @@ export function MessageBubble({
                         }}
                         className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
                       >
-                        {!message.encrypted && (
+                        {editable && (
                           <button
                             type="button"
                             role="menuitem"

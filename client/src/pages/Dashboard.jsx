@@ -105,8 +105,34 @@ export default function Dashboard() {
           ),
         );
       };
-    const handleEdited = ({ roomId, messageId, text }) =>
+
+    const handleEdited = async ({
+      roomId,
+      messageId,
+      text,
+      e2ee,
+      senderId,
+    }) => {
+      if (e2ee) {
+        // Decrypt first, so the preview changes in one step with no placeholder.
+        const previewText = await decryptPreview(
+          { e2ee, sender: senderId },
+          { roomId, userId: user.id },
+        );
+
+        setPreviews((prev) => ({ ...prev, [messageId]: previewText }));
+        setRooms((prev) =>
+          prev.map((room) =>
+            room.id === roomId && room.lastMessage?.messageId === messageId
+              ? { ...room, lastMessage: { ...room.lastMessage, e2ee } }
+              : room,
+          ),
+        );
+        return;
+      }
+
       handlePreviewTextChange(text)({ roomId, messageId });
+    };
 
     const handleDeleted = ({ roomId, messageId }) =>
       handlePreviewTextChange("This message was deleted")({

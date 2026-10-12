@@ -250,11 +250,43 @@ export function ChatWindow({
         prev.map((m) => (m._id === messageId ? { ...m, reactions } : m)),
       );
     };
-    // Someone edited a message — swap in the new text, mark it edited.
-    const handleEdited = ({ roomId, messageId, text, editedAt }) => {
+
+    // Someone edited a message. A plaintext edit carries the new text; an
+    // encrypted edit carries a new envelope that is decrypted here.
+    const handleEdited = async ({
+      roomId,
+      messageId,
+      text,
+      e2ee,
+      senderId,
+      editedAt,
+    }) => {
       if (roomId !== room.id) return;
+
+      let newText = text;
+      let decrypt;
+
+      if (e2ee) {
+        const readable = await decryptMessage(
+          { encrypted: true, e2ee, sender: { _id: senderId } },
+          { roomId: room.id, userId: currentUser.id },
+        );
+        newText = readable.text;
+        decrypt = readable.decrypt;
+      }
+
       setMessages((prev) =>
-        prev.map((m) => (m._id === messageId ? { ...m, text, editedAt } : m)),
+        prev.map((m) =>
+          m._id === messageId
+            ? {
+                ...m,
+                text: newText,
+                e2ee: e2ee ?? m.e2ee,
+                decrypt: decrypt ?? m.decrypt,
+                editedAt,
+              }
+            : m,
+        ),
       );
     };
     // Someone deleted a message — the SERVER already cleared text/reactions;
@@ -421,11 +453,39 @@ export function ChatWindow({
     );
   };
 
-  const handleEditMessage = (messageId, text) => {
+  const handleEditMessage = async (messageId, text) => {
     if (!socket) return;
-    socket.emit("message:edit", { roomId: room.id, messageId, text }, (ack) => {
+
+    const original = messages.find((m) => m._id === messageId);
+
+    try {
+      let payload = { text };
+
+      // An edit of an encrypted message is encrypted for every current device.
+      if (original?.encrypted) {
+        payload = await buildOutgoingMessage({ room, currentUser, text });
+        if (!payload.e2ee) throw new Error("Couldn't encrypt that edit.");
+      }
+
+      const ack = await new Promise((resolve) => {
+        socket
+          .timeout(10000)
+          .emit(
+            "message:edit",
+            { roomId: room.id, messageId, ...payload },
+            (err, response) =>
+              resolve(
+                err
+                  ? { success: false, message: "No response from the server." }
+                  : response,
+              ),
+          );
+      });
+
       if (!ack?.success) alert(ack?.message || "Couldn't edit that message.");
-    });
+    } catch (err) {
+      alert(err.message || "Couldn't edit that message.");
+    }
   };
 
   const handleDeleteMessage = (messageId) => {
@@ -539,6 +599,9 @@ export function ChatWindow({
                   isGroup={room.type === "group"}
                   recipientCount={recipientCount}
                   currentUserId={currentUser.id}
+                  editable={
+                    m.encrypted ? m.decrypt === "ok" : encryption !== "active"
+                  }
                   onReact={handleReact}
                   onEdit={handleEditMessage}
                   onDelete={handleDeleteMessage}

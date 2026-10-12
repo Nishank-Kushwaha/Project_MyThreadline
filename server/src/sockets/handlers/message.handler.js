@@ -247,61 +247,98 @@ function registerMessageHandlers(io, socket) {
   });
 
   // Sender-only, within the edit window, and never on an already-deleted message.
-  socket.on("message:edit", async ({ roomId, messageId, text }, callback) => {
-    try {
-      if (!text || !text.trim())
-        throw new ApiError(400, "Message text is required");
+  socket.on(
+    "message:edit",
+    async ({ roomId, messageId, text, e2ee }, callback) => {
+      try {
+        const room = await Room.findOne({
+          _id: roomId,
+          "members.userId": socket.userId,
+        });
+        if (!room) throw new ApiError(403, "You are not a member of this room");
 
-      const room = await Room.findOne({
-        _id: roomId,
-        "members.userId": socket.userId,
-      });
-      if (!room) throw new ApiError(403, "You are not a member of this room");
+        const message = await Message.findOne({
+          _id: messageId,
+          roomId,
+          type: { $ne: "system" },
+        });
 
-      const message = await Message.findOne({
-        _id: messageId,
-        roomId,
-        type: { $ne: "system" },
-      });
+        if (!message) throw new ApiError(404, "Message not found");
+        if (message.sender.toString() !== socket.userId) {
+          throw new ApiError(403, "You can only edit your own messages");
+        }
+        if (message.deletedAt)
+          throw new ApiError(400, "Can't edit a deleted message");
 
-      if (!message) throw new ApiError(404, "Message not found");
-      if (message.encrypted) {
-        throw new ApiError(
-          400,
-          "Editing encrypted messages isn't supported yet",
-        );
+        const age = Date.now() - message.createdAt.getTime();
+        if (age > EDIT_WINDOW_MS)
+          throw new ApiError(403, "This message is too old to edit");
+
+        let envelope = null;
+
+        if (message.encrypted) {
+          // The new version must be encrypted too: accepting plaintext here
+          // would put the edited text in the database, readable.
+          if (!e2ee) {
+            throw new ApiError(
+              400,
+              "Edits to encrypted messages must be encrypted",
+            );
+          }
+
+          envelope = await validateEnvelope(e2ee, {
+            room,
+            userId: socket.userId,
+            deviceId: socket.data.deviceId,
+          });
+
+          message.e2ee = envelope; // the old ciphertext is replaced
+        } else {
+          if (e2ee) throw new ApiError(400, "This message isn't encrypted");
+
+          // An old plaintext message can't be edited once the chat is
+          // encrypted, or its new text would be stored readable.
+          if (room.encrypted) {
+            throw new ApiError(
+              400,
+              "Messages sent before encryption was turned on can't be edited",
+            );
+          }
+
+          if (!text || !text.trim())
+            throw new ApiError(400, "Message text is required");
+
+          message.text = text.trim();
+        }
+
+        message.editedAt = new Date();
+        await message.save();
+
+        // If this was the room's preview message, keep the sidebar in sync too.
+        if (room.lastMessage?.messageId?.toString() === messageId) {
+          if (envelope) {
+            room.lastMessage.e2ee = envelope;
+            room.markModified("lastMessage.e2ee");
+          } else {
+            room.lastMessage.text = message.text;
+          }
+          await room.save();
+        }
+
+        io.to(roomId).emit("message:edited", {
+          roomId,
+          messageId,
+          senderId: socket.userId,
+          editedAt: message.editedAt,
+          ...(envelope ? { e2ee: envelope } : { text: message.text }),
+        });
+
+        callback?.({ success: true });
+      } catch (err) {
+        callback?.({ success: false, message: err.message });
       }
-      if (message.sender.toString() !== socket.userId) {
-        throw new ApiError(403, "You can only edit your own messages");
-      }
-      if (message.deletedAt)
-        throw new ApiError(400, "Can't edit a deleted message");
-
-      const age = Date.now() - message.createdAt.getTime();
-      if (age > EDIT_WINDOW_MS)
-        throw new ApiError(403, "This message is too old to edit");
-
-      message.text = text.trim();
-      message.editedAt = new Date();
-      await message.save();
-
-      // If this was the room's preview message, keep the sidebar in sync too.
-      if (room.lastMessage?.messageId?.toString() === messageId) {
-        room.lastMessage.text = message.text;
-        await room.save();
-      }
-
-      io.to(roomId).emit("message:edited", {
-        roomId,
-        messageId,
-        text: message.text,
-        editedAt: message.editedAt,
-      });
-      callback?.({ success: true });
-    } catch (err) {
-      callback?.({ success: false, message: err.message });
-    }
-  });
+    },
+  );
 
   // Soft delete: sender-only, no time limit.
   // Keeps the document in the database to preserve conversation history.
