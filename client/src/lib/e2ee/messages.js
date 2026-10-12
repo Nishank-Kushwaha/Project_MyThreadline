@@ -1,5 +1,5 @@
 import { getIdentity } from "./identity";
-import { getUserDeviceKeys } from "./directory";
+import { getRoomEncryption } from "./directory";
 import { decryptEnvelope, encryptEnvelope } from "./crypto";
 
 export const MAX_TEXT_LENGTH = 4000;
@@ -12,27 +12,23 @@ export async function buildOutgoingMessage({ room, currentUser, text }) {
     throw new Error(`Messages can be up to ${MAX_TEXT_LENGTH} characters.`);
   }
 
-  // Groups aren't encrypted yet (Phase 4).
-  if (room.type !== "private") return { text };
+  const hasAllKeys = (info) => info.members.every((m) => m.hasKeys);
 
-  let [mine, theirs] = await Promise.all([
-    getUserDeviceKeys(currentUser.id),
-    getUserDeviceKeys(room.otherUserId),
-  ]);
+  let info = await getRoomEncryption(room.id);
 
   // The cached list may be a few seconds old: re-check before giving up.
-  if (mine.length === 0 || theirs.length === 0) {
-    [mine, theirs] = await Promise.all([
-      getUserDeviceKeys(currentUser.id, { force: true }),
-      getUserDeviceKeys(room.otherUserId, { force: true }),
-    ]);
+  if (!hasAllKeys(info)) {
+    info = await getRoomEncryption(room.id, { force: true });
   }
 
-  if (mine.length === 0 || theirs.length === 0) {
-    if (room.encrypted) {
-      throw new Error("Encryption isn't available for this chat right now.");
-    }
-    return { text }; // the other person hasn't set up encryption yet
+  const mustEncrypt = info.encrypted || room.encrypted;
+
+  // Not everyone can read encrypted messages yet and the chat isn't locked in.
+  if (!hasAllKeys(info) && !mustEncrypt) return { text };
+
+  // A private chat with a device-less person has nobody who could read it.
+  if (room.type === "private" && !hasAllKeys(info)) {
+    throw new Error("Encryption isn't available for this chat right now.");
   }
 
   const identity = await getIdentity(currentUser.id);
@@ -46,11 +42,7 @@ export async function buildOutgoingMessage({ room, currentUser, text }) {
       publicKey: identity.publicKey,
       privateKey: identity.privateKey,
     },
-    recipients: [...mine, ...theirs].map((key) => ({
-      userId: key.userId,
-      deviceId: key.deviceId,
-      publicKey: key.publicKey,
-    })),
+    recipients: info.devices,
   });
 
   return { e2ee: envelope };
@@ -73,11 +65,12 @@ export async function decryptMessage(message, { roomId, userId }) {
 
     return { ...message, text: payload.text, decrypt: "ok" };
   } catch (err) {
-    return {
-      ...message,
-      text: "",
-      decrypt: err.reason === "not-for-this-device" ? "other-device" : "failed",
+    const reasons = {
+      "not-for-this-device": "other-device",
+      "not-a-recipient": "not-recipient",
     };
+
+    return { ...message, text: "", decrypt: reasons[err.reason] ?? "failed" };
   }
 }
 

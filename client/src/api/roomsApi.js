@@ -1,5 +1,8 @@
 import api from "./axios";
 
+export const getRoomEncryptionRequest = (roomId) =>
+  api.get(`/rooms/${roomId}/encryption`);
+
 export const createRoomRequest = (data) => api.post("/rooms", data);
 
 export const listRoomsRequest = () => api.get("/rooms");

@@ -92,7 +92,9 @@ export function MessageBubble({
 
   const isDeleted = !!message.deletedAt;
   const undecryptable =
-    message.decrypt === "failed" || message.decrypt === "other-device";
+    message.decrypt === "failed" ||
+    message.decrypt === "other-device" ||
+    message.decrypt === "not-recipient";
 
   const time = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "2-digit",
@@ -449,7 +451,9 @@ export function MessageBubble({
                     <Lock className="h-3.5 w-3.5 shrink-0" />
                     {message.decrypt === "other-device"
                       ? "Sent before this device was set up, so it can't be read here"
-                      : "Couldn't decrypt this message"}
+                      : message.decrypt === "not-recipient"
+                        ? "Sent before you joined this chat"
+                        : "Couldn't decrypt this message"}
                   </p>
                 ) : (
                   <p className="whitespace-pre-wrap wrap-break-word text-sm">

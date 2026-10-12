@@ -36,6 +36,22 @@ function emitSystemMessage(io, roomId, message, exceptUserId = null) {
   );
 }
 
+async function getEncryption(req, res, next) {
+  try {
+    const info = await roomsService.getRoomEncryption(
+      req.params.roomId,
+      req.userId,
+    );
+
+    res.status(200).json({
+      success: true,
+      ...info,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createRoom(req, res, next) {
   try {
     const { type, memberId, name, memberIds } = req.body;
@@ -542,6 +558,7 @@ async function listRooms(req, res, next) {
 }
 
 export {
+  getEncryption,
   createRoom,
   listRooms,
   getMembers,

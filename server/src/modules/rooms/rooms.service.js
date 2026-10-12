@@ -2,6 +2,10 @@ import Room from "../../models/Room.js";
 import Message from "../../models/Message.js";
 import ApiError from "../../utils/ApiError.js";
 import { uploadAvatarImage, deleteImage } from "../../utils/imageStorage.js";
+import DeviceKey from "../../models/DeviceKey.js";
+import { viewForUser } from "../messages/e2ee.validation.js";
+
+const MAX_GROUP_MEMBERS = 50;
 
 function shapeRoom(room, userId) {
   const myMembership = room.members.find(
@@ -36,7 +40,9 @@ function shapeRoom(room, userId) {
     status: display.status,
     lastSeen: display.lastSeen,
     otherUserId: display.otherUserId,
-    lastMessage: room.lastMessage || null,
+    lastMessage: room.lastMessage
+      ? viewForUser(room.lastMessage, userId)
+      : null,
     unreadCount: myMembership?.unreadCount || 0,
     memberCount: room.members.length,
     isAdmin: myMembership?.isAdmin || false,
@@ -73,6 +79,38 @@ async function assertGroupAdmin(roomId, userId) {
   return room;
 }
 
+// Everything a sender needs to encrypt for this chat in one call: who is in it,
+// who has a key, and every device's public key.
+async function getRoomEncryption(roomId, userId) {
+  const room = await Room.findOne({ _id: roomId, "members.userId": userId })
+    .populate("members.userId", "name")
+    .lean();
+
+  if (!room) throw new ApiError(403, "You are not a member of this room");
+
+  const memberIds = room.members.map((m) => m.userId._id);
+
+  const keys = await DeviceKey.find({ userId: { $in: memberIds } })
+    .select("userId deviceId publicKey")
+    .lean();
+
+  const withKeys = new Set(keys.map((key) => key.userId.toString()));
+
+  return {
+    encrypted: Boolean(room.encrypted),
+    members: room.members.map((m) => ({
+      userId: m.userId._id.toString(),
+      name: m.userId.name,
+      hasKeys: withKeys.has(m.userId._id.toString()),
+    })),
+    devices: keys.map((key) => ({
+      userId: key.userId.toString(),
+      deviceId: key.deviceId,
+      publicKey: key.publicKey,
+    })),
+  };
+}
+
 async function createPrivateRoom(userId, otherUserId) {
   if (userId === otherUserId)
     throw new ApiError(400, "Can't start a chat with yourself");
@@ -98,6 +136,13 @@ async function createGroupRoom(userId, name, memberIds = []) {
   const uniqueMemberIds = [...new Set([userId, ...memberIds])];
   if (uniqueMemberIds.length < 3)
     throw new ApiError(400, "A group needs at least 2 other members");
+
+  if (uniqueMemberIds.length > MAX_GROUP_MEMBERS) {
+    throw new ApiError(
+      400,
+      `A group can have at most ${MAX_GROUP_MEMBERS} members`,
+    );
+  }
 
   const joinedAt = new Date();
 
@@ -132,6 +177,26 @@ async function addRoomMember(roomId, requesterId, newMemberId) {
 
   if (alreadyIn) {
     throw new ApiError(409, "That person is already in the group");
+  }
+
+  if (room.members.length >= MAX_GROUP_MEMBERS) {
+    throw new ApiError(
+      409,
+      `A group can have at most ${MAX_GROUP_MEMBERS} members`,
+    );
+  }
+
+  // Messages in an encrypted group are locked for each member's devices, so a
+  // newcomer needs at least one or they could never read anything.
+  if (room.encrypted) {
+    const hasDevice = await DeviceKey.exists({ userId: newMemberId });
+
+    if (!hasDevice) {
+      throw new ApiError(
+        409,
+        "That person hasn't set up encryption yet, so they can't join an encrypted group",
+      );
+    }
   }
 
   const joinedAt = new Date();
@@ -487,6 +552,7 @@ async function removeGroupAvatar(roomId, requesterId) {
 }
 
 export {
+  getRoomEncryption,
   createPrivateRoom,
   createGroupRoom,
   getUserRooms,

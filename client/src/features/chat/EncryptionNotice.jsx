@@ -1,10 +1,21 @@
 import React from "react";
 import { Lock, ShieldAlert } from "lucide-react";
 
-export function EncryptionNotice({ kind, name }) {
+function formatNames(names) {
+  if (names.length === 1) return `${names[0]} hasn't`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} haven't`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} other${names.length - 2 > 1 ? "s" : ""} haven't`;
+}
+
+export function EncryptionNotice({ kind, name, names = [], isGroup = false }) {
   const notices = {
-    active: `Messages in this chat are end-to-end encrypted. Only you and ${name} can read them.`,
-    pending: `${name} hasn't set up encryption yet, so messages aren't encrypted for now.`,
+    active: isGroup
+      ? "Messages in this group are end-to-end encrypted. Only members of the group can read them."
+      : `Messages in this chat are end-to-end encrypted. Only you and ${name} can read them.`,
+    pending:
+      names.length > 0
+        ? `${formatNames(names)} set up encryption yet, so messages aren't encrypted for now.`
+        : "Encryption isn't set up on this device yet, so messages aren't encrypted for now.",
     started:
       "End-to-end encryption starts here. Earlier messages weren't encrypted.",
   };

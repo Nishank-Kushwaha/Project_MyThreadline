@@ -8,6 +8,7 @@ const router = Router();
 
 router.use(authGuard);
 
+router.get("/:roomId/encryption", roomsController.getEncryption);
 router.post("/", roomsController.createRoom);
 router.get("/", roomsController.listRooms);
 router.get("/:roomId/messages", messagesController.getHistory);

@@ -2,6 +2,7 @@ import Message from "../../models/Message.js";
 import Room from "../../models/Room.js";
 import User from "../../models/User.js";
 import { assertMembership } from "../rooms/rooms.service.js";
+import { viewForUser } from "./e2ee.validation.js";
 
 async function getRoomMessages(userId, roomId, { before, limit = 30 } = {}) {
   await assertMembership(roomId, userId);
@@ -18,7 +19,7 @@ async function getRoomMessages(userId, roomId, { before, limit = 30 } = {}) {
     .populate("reactions.userId", "name")
     .lean();
 
-  return messages.reverse(); // flip to oldest-first for rendering
+  return messages.reverse().map((m) => viewForUser(m, userId)); // oldest-first, with only this user's locks
 }
 
 // Plain, viewer-neutral sentence. Used for the sidebar preview and as a

@@ -1,7 +1,8 @@
 import DeviceKey from "../../models/DeviceKey.js";
 import ApiError from "../../utils/ApiError.js";
 
-const MAX_KEYS = 40;
+// 50 members x a few devices each, with room to spare.
+const MAX_KEYS = 250;
 const MAX_CIPHERTEXT_LENGTH = 24000;
 
 const isBase64Url = (value, length) =>
@@ -21,6 +22,21 @@ async function allMembersHaveDeviceKeys(room) {
   });
 
   return withKeys.length === memberIds.length;
+}
+
+// A message (or last-message preview) as one person should receive it: the
+// locked keys are trimmed to that person's own entries. Everyone else's device
+// ids and locks are none of their business, and it keeps group messages small.
+function viewForUser(message, userId) {
+  if (!message?.e2ee?.keys) return message;
+
+  return {
+    ...message,
+    e2ee: {
+      ...message.e2ee,
+      keys: message.e2ee.keys.filter((key) => key.userId === userId),
+    },
+  };
 }
 
 // Checks the shape and the claims of an encrypted message and returns a clean
@@ -49,15 +65,34 @@ async function validateEnvelope(raw, { room, userId, deviceId }) {
     throw invalid();
   }
 
-  const memberIds = new Set(room.members.map((m) => m.userId.toString()));
-  const seen = new Set();
+  const memberIds = room.members.map((m) => m.userId.toString());
+  const memberSet = new Set(memberIds);
 
-  const keys = raw.keys.map((entry) => {
+  // The registered devices of the CURRENT members: the only ones a message can
+  // be locked for.
+  const registered = await DeviceKey.find({ userId: { $in: memberIds } })
+    .select("userId deviceId publicKey")
+    .lean();
+
+  const registeredIds = new Set(
+    registered.map((key) => `${key.userId}:${key.deviceId}`),
+  );
+  const membersWithDevices = new Set(
+    registered.map((key) => key.userId.toString()),
+  );
+
+  const seen = new Set();
+  const keys = [];
+
+  for (const entry of raw.keys) {
     if (!entry || typeof entry !== "object") throw invalid();
 
     const { userId: entryUserId, deviceId: entryDeviceId } = entry;
 
-    if (typeof entryUserId !== "string" || !memberIds.has(entryUserId)) {
+    if (
+      typeof entryUserId !== "string" ||
+      !/^[0-9a-f]{24}$/.test(entryUserId)
+    ) {
       throw invalid();
     }
     if (
@@ -78,30 +113,44 @@ async function validateEnvelope(raw, { room, userId, deviceId }) {
     if (seen.has(id)) throw invalid();
     seen.add(id);
 
-    return {
+    // Locks for someone who just left the group, or for a device that no
+    // longer exists, are dropped instead of stored.
+    if (!memberSet.has(entryUserId) || !registeredIds.has(id)) continue;
+
+    keys.push({
       userId: entryUserId,
       deviceId: entryDeviceId,
       epk: entry.epk,
       iv: entry.iv,
       wrapped: entry.wrapped,
-    };
-  });
+    });
+  }
 
   // The sender's key must be the one registered for that device.
-  const senderKey = await DeviceKey.findOne({ userId, deviceId }).lean();
+  const senderKey = registered.find(
+    (key) => key.userId.toString() === userId && key.deviceId === deviceId,
+  );
 
   if (!senderKey || senderKey.publicKey !== raw.spk) {
     throw invalid("Your device key isn't registered or has changed");
   }
 
-  // The sender must be able to read it back, and so must every other member.
-  if (!seen.has(`${userId}:${deviceId}`)) throw invalid();
+  // The sender must be able to read it back...
+  if (!keys.some((key) => key.userId === userId && key.deviceId === deviceId)) {
+    throw invalid();
+  }
 
-  for (const memberId of memberIds) {
-    if (memberId === userId) continue;
+  // ...and so must every member who has a device. If someone joined while the
+  // sender was encrypting, their list was out of date: ask for a retry.
+  for (const memberId of membersWithDevices) {
+    if (!keys.some((key) => key.userId === memberId)) {
+      throw invalid("Group members changed. Please try again.");
+    }
+  }
 
-    const hasEntry = [...seen].some((id) => id.startsWith(`${memberId}:`));
-    if (!hasEntry) throw invalid("The other person's devices are missing");
+  // In a private chat both people must have a device, or nobody could read it.
+  if (room.type === "private" && membersWithDevices.size !== memberSet.size) {
+    throw invalid("The other person hasn't set up encryption yet");
   }
 
   return {
@@ -114,4 +163,4 @@ async function validateEnvelope(raw, { room, userId, deviceId }) {
   };
 }
 
-export { allMembersHaveDeviceKeys, validateEnvelope };
+export { allMembersHaveDeviceKeys, validateEnvelope, viewForUser };

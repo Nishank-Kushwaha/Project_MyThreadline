@@ -15,7 +15,10 @@ import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
 import { EncryptionNotice } from "./EncryptionNotice";
 import { useE2EE } from "@/features/e2ee/E2EEContext";
-import { getUserDeviceKeys } from "@/lib/e2ee/directory";
+import {
+  clearRoomEncryptionCache,
+  getRoomEncryption,
+} from "@/lib/e2ee/directory";
 import {
   buildOutgoingMessage,
   decryptMessage,
@@ -56,8 +59,9 @@ export function ChatWindow({
   const [isLoading, setIsLoading] = useState(true);
   const [typingUsers, setTypingUsers] = useState({}); // { [userId]: name }
   const [sendError, setSendError] = useState("");
-  // "off" (groups) | "checking" | "active" | "pending"
-  const [encryption, setEncryption] = useState("checking");
+  const [encryption, setEncryption] = useState("checking"); // "off" (groups) | "checking" | "active" | "pending"
+  const [pendingNames, setPendingNames] = useState([]); // members without a key
+  const [rosterVersion, setRosterVersion] = useState(0); // bump to re-check
 
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -88,45 +92,58 @@ export function ChatWindow({
 
   // ---------- 0) Is this chat encrypted (or about to be)? ----------
   useEffect(() => {
-    if (room.type !== "private") {
-      setEncryption("off");
-      return;
-    }
-
-    if (room.encrypted) {
-      setEncryption("active");
-      return;
-    }
-
     let cancelled = false;
     setEncryption("checking");
 
-    Promise.all([
-      getUserDeviceKeys(currentUser.id),
-      getUserDeviceKeys(room.otherUserId),
-    ])
-      .then(([mine, theirs]) => {
-        if (!cancelled) {
-          setEncryption(
-            mine.length > 0 && theirs.length > 0 ? "active" : "pending",
-          );
-        }
+    getRoomEncryption(room.id)
+      .then((info) => {
+        if (cancelled) return;
+
+        const missing = info.members
+          .filter((m) => !m.hasKeys && m.userId !== currentUser.id)
+          .map((m) => m.name);
+        const iHaveKeys = info.members.some(
+          (m) => m.userId === currentUser.id && m.hasKeys,
+        );
+
+        setPendingNames(missing);
+        setEncryption(
+          info.encrypted ||
+            room.encrypted ||
+            (missing.length === 0 && iHaveKeys)
+            ? "active"
+            : "pending",
+        );
       })
       .catch(() => {
-        if (!cancelled) setEncryption("pending");
+        if (!cancelled) {
+          setPendingNames([]);
+          setEncryption("pending");
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [
-    room.id,
-    room.type,
-    room.encrypted,
-    room.otherUserId,
-    currentUser.id,
-    e2ee.status,
-  ]);
+  }, [room.id, room.encrypted, currentUser.id, e2ee.status, rosterVersion]);
+
+  // Someone joined or left: the next send must use a fresh member list.
+  useEffect(() => {
+    if (!socket) return;
+
+    const refresh = ({ roomId }) => {
+      if (roomId !== room.id) return;
+      clearRoomEncryptionCache(room.id);
+      setRosterVersion((n) => n + 1);
+    };
+
+    socket.on("room:member-added", refresh);
+    socket.on("room:member-removed", refresh);
+    return () => {
+      socket.off("room:member-added", refresh);
+      socket.off("room:member-removed", refresh);
+    };
+  }, [socket, room.id]);
 
   // ---------- 1) History over REST ----------
   useEffect(() => {
@@ -411,10 +428,10 @@ export function ChatWindow({
     stopTyping();
     setSendError("");
 
-    try {
+    const attempt = async () => {
       const payload = await buildOutgoingMessage({ room, currentUser, text });
 
-      const ack = await new Promise((resolve) => {
+      return new Promise((resolve) => {
         socket
           .timeout(10000)
           .emit(
@@ -428,6 +445,17 @@ export function ChatWindow({
               ),
           );
       });
+    };
+
+    try {
+      let ack = await attempt();
+
+      // Someone joined while this was being encrypted: re-read the member
+      // list and try once more.
+      if (!ack?.success && ack?.message?.includes("members changed")) {
+        clearRoomEncryptionCache(room.id);
+        ack = await attempt();
+      }
 
       if (!ack?.success) {
         setSendError(ack?.message || "Message failed to send.");
@@ -568,10 +596,14 @@ export function ChatWindow({
         className="flex-1 overflow-y-auto p-4"
       >
         {!isLoading && encryption === "active" && (
-          <EncryptionNotice kind="active" name={room.name} />
+          <EncryptionNotice
+            kind="active"
+            name={room.name}
+            isGroup={room.type === "group"}
+          />
         )}
         {!isLoading && encryption === "pending" && (
-          <EncryptionNotice kind="pending" name={room.name} />
+          <EncryptionNotice kind="pending" names={pendingNames} />
         )}
 
         {isLoading ? (

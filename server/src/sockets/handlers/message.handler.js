@@ -8,6 +8,7 @@ import {
 import {
   allMembersHaveDeviceKeys,
   validateEnvelope,
+  viewForUser,
 } from "../../modules/messages/e2ee.validation.js";
 
 // Matches WhatsApp's own edit window — long enough to fix a typo, short
@@ -25,6 +26,15 @@ async function getOnlineUserIds(io, userIds) {
   return results.filter(Boolean);
 }
 
+// Sends one event to every member, building each person's payload separately so
+// an encrypted message carries only that person's own locked keys.
+function emitToMembers(io, room, event, buildPayload) {
+  for (const member of room.members) {
+    const memberId = member.userId.toString();
+    io.to(`user:${memberId}`).emit(event, buildPayload(memberId));
+  }
+}
+
 function registerMessageHandlers(io, socket) {
   // Fired when a user sends a message. The server saves it, updates the room's
   // lastMessage, and broadcasts it to everyone in the room (including the sender).
@@ -36,38 +46,32 @@ function registerMessageHandlers(io, socket) {
       });
       if (!room) throw new ApiError(403, "You are not a member of this room");
 
-      // Private chats are end-to-end encrypted once every member has a
-      // registered device key. From then on plaintext is refused, so a bug or
-      // an old client can't silently downgrade the chat.
+      // Chats are end-to-end encrypted once every member has a registered
+      // device key. From then on plaintext is refused, so a bug or an old
+      // client can't silently downgrade the chat.
       let envelope = null;
+      const ready = await allMembersHaveDeviceKeys(room);
 
-      if (room.type === "private") {
-        const ready = await allMembersHaveDeviceKeys(room);
-
-        if (room.encrypted || ready) {
-          if (!e2ee) {
-            throw new ApiError(
-              400,
-              "This chat is end-to-end encrypted. Reload the app and try again.",
-            );
-          }
-
-          envelope = await validateEnvelope(e2ee, {
-            room,
-            userId: socket.userId,
-            deviceId: socket.data.deviceId,
-          });
-          room.encrypted = true;
-        } else if (e2ee) {
+      if (room.encrypted || ready) {
+        if (!e2ee) {
           throw new ApiError(
             400,
-            "The other person hasn't set up encryption yet",
+            "This chat is end-to-end encrypted. Reload the app and try again.",
           );
         }
+
+        envelope = await validateEnvelope(e2ee, {
+          room,
+          userId: socket.userId,
+          deviceId: socket.data.deviceId,
+        });
+        room.encrypted = true;
       } else if (e2ee) {
         throw new ApiError(
           400,
-          "Encryption isn't available in group chats yet",
+          room.type === "private"
+            ? "The other person hasn't set up encryption yet"
+            : "Some members haven't set up encryption yet",
         );
       }
 
@@ -106,18 +110,31 @@ function registerMessageHandlers(io, socket) {
       };
       await room.save();
 
-      io.to(roomId).emit("message:new", {
-        roomId,
-        message,
-        // Lets any page build a notification without already knowing the room.
-        room: {
-          type: room.type,
-          name: room.name,
-          avatarUrl: room.groupAvatarUrl,
-        },
-      });
+      const roomInfo = {
+        type: room.type,
+        name: room.name,
+        avatarUrl: room.groupAvatarUrl,
+      };
 
-      callback?.({ success: true, message });
+      if (envelope) {
+        // Each member gets only their own locked keys.
+        const plain = message.toJSON();
+
+        emitToMembers(io, room, "message:new", (memberId) => ({
+          roomId,
+          message: viewForUser(plain, memberId),
+          // Lets any page build a notification without already knowing the room.
+          room: roomInfo,
+        }));
+
+        callback?.({
+          success: true,
+          message: viewForUser(plain, socket.userId),
+        });
+      } else {
+        io.to(roomId).emit("message:new", { roomId, message, room: roomInfo });
+        callback?.({ success: true, message });
+      }
 
       // Per recipient device: push right away if the device is offline, or if
       // it's connected but its page doesn't confirm in time. Not awaited, so a
@@ -325,13 +342,24 @@ function registerMessageHandlers(io, socket) {
           await room.save();
         }
 
-        io.to(roomId).emit("message:edited", {
+        const edited = {
           roomId,
           messageId,
           senderId: socket.userId,
           editedAt: message.editedAt,
-          ...(envelope ? { e2ee: envelope } : { text: message.text }),
-        });
+        };
+
+        if (envelope) {
+          emitToMembers(io, room, "message:edited", (memberId) => ({
+            ...edited,
+            e2ee: viewForUser({ e2ee: envelope }, memberId).e2ee,
+          }));
+        } else {
+          io.to(roomId).emit("message:edited", {
+            ...edited,
+            text: message.text,
+          });
+        }
 
         callback?.({ success: true });
       } catch (err) {

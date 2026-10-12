@@ -173,7 +173,15 @@ export async function decryptEnvelope({ roomId, envelope, senderUserId, me }) {
   const entry = envelope.keys.find(
     (key) => key.userId === me.userId && key.deviceId === me.deviceId,
   );
-  if (!entry) throw new DecryptError("not-for-this-device");
+
+  if (!entry) {
+    // No locks for me at all: I wasn't a member (or had no device) when this
+    // was sent. Locks for my other devices only: this device is newer.
+    const hasAnyOfMine = envelope.keys.some((key) => key.userId === me.userId);
+    throw new DecryptError(
+      hasAnyOfMine ? "not-for-this-device" : "not-a-recipient",
+    );
+  }
 
   const dh1 = await ecdh(me.privateKey, entry.epk);
   const dh2 = await ecdh(me.privateKey, envelope.spk);
