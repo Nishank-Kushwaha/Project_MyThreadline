@@ -1,6 +1,8 @@
 // Service worker for Threadline notifications.
 // Phase 1: lifecycle + notification click. The "push" handler comes in Phase 5.
 
+importScripts("/sw-e2ee.js");
+
 self.addEventListener("install", () => {
   self.skipWaiting(); // activate the new version immediately
 });
@@ -50,8 +52,26 @@ self.addEventListener("push", (event) => {
           n.data?.messageId && n.data.messageId === payload.data?.messageId,
       );
 
+      // End-to-end encrypted message: the push carries only this device's
+      // locked copy. Decrypt it here; on any failure the generic text stays.
+      let body = payload.body;
+
+      if (payload.e2ee) {
+        const text = await self.decryptPushPreview({
+          ...payload.e2ee,
+          roomId: payload.data?.roomId,
+        });
+
+        if (text) {
+          const short = text.length > 120 ? `${text.slice(0, 120)}…` : text;
+          body = payload.e2ee.isGroup
+            ? `${payload.e2ee.senderName}: ${short}`
+            : short;
+        }
+      }
+
       await self.registration.showNotification(payload.title || "Threadline", {
-        body: payload.body,
+        body,
         icon: payload.icon,
         tag: payload.tag,
         data: payload.data,

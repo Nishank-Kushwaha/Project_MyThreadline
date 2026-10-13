@@ -117,11 +117,15 @@ async function sendToUser(userId, payload, { deviceIds } = {}) {
   const subscriptions = await PushSubscription.find(query).lean();
   if (subscriptions.length === 0) return result;
 
-  const body = JSON.stringify(payload);
-
   await Promise.all(
     subscriptions.map(async (sub) => {
       try {
+        // A payload can be a function, so each device gets its own version
+        // (an encrypted push carries only that device's own locked key).
+        const body = JSON.stringify(
+          typeof payload === "function" ? payload(sub) : payload,
+        );
+
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: sub.keys },
           body,

@@ -17,6 +17,9 @@ const pendingAcks = new Map();
 // gap). Remembered briefly so scheduleFallbackPush can honour them.
 const earlyAcks = new Map(); // key -> expiry timer
 
+// A push is limited to about 4 KB once the push service has encrypted it.
+const MAX_PUSH_BYTES = 3400;
+
 const ackKey = (userId, deviceId, messageId) =>
   `${userId}:${deviceId ?? "none"}:${messageId}`;
 
@@ -29,6 +32,47 @@ function trimText(text = "") {
   return text.length > MAX_BODY_LENGTH
     ? `${text.slice(0, MAX_BODY_LENGTH)}…`
     : text;
+}
+
+// Adds the encrypted message to the push so the device's service worker can
+// decrypt a preview itself. The server never sees the text. Falls back to the
+// plain generic push whenever it can't or shouldn't.
+function withEncryptedPreview(
+  base,
+  { plain, userId, sub, showPreview, isGroup, senderName },
+) {
+  if (!plain.encrypted || !plain.e2ee || !showPreview || !sub.deviceId) {
+    return base;
+  }
+
+  // Only THIS device's locked key: it can't open anyone else's, and it keeps
+  // the push small.
+  const keys = plain.e2ee.keys.filter(
+    (key) => key.userId === userId && key.deviceId === sub.deviceId,
+  );
+  if (keys.length === 0) return base;
+
+  const full = {
+    ...base,
+    e2ee: {
+      envelope: {
+        v: plain.e2ee.v,
+        senderDeviceId: plain.e2ee.senderDeviceId,
+        spk: plain.e2ee.spk,
+        iv: plain.e2ee.iv,
+        ciphertext: plain.e2ee.ciphertext,
+        keys,
+      },
+      userId,
+      senderId: plain.sender._id.toString(),
+      isGroup,
+      senderName,
+    },
+  };
+
+  return Buffer.byteLength(JSON.stringify(full)) <= MAX_PUSH_BYTES
+    ? full
+    : base;
 }
 
 // Missing settings default to on.
@@ -109,33 +153,44 @@ async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
     const prefsFor = await getPrefsFor(recipientIds);
     const isGroup = room.type === "group";
     const senderName = message.sender.name;
+    const plain = message.toObject ? message.toObject() : message;
 
     await Promise.all(
       recipientIds.map(async (userId) => {
         const { enabled, showPreview } = prefsFor(userId);
         if (!enabled) return;
 
-        // The sender's name always shows; the text only when previews are on.
-        // Encrypted messages are unreadable here, so their push is generic.
+        // Plain (older) messages can show their text. Encrypted ones are
+        // unreadable here, so they start generic and may be upgraded below.
         const text =
           message.encrypted || !showPreview
             ? "New message"
             : trimText(message.text);
 
+        const base = {
+          title: isGroup ? room.name : senderName,
+          body: isGroup ? `${senderName}: ${text}` : text,
+          icon: avatarFor(
+            isGroup ? room.groupAvatarUrl : message.sender.avatarUrl,
+          ),
+          tag: `room:${room._id}`,
+          data: {
+            roomId: room._id.toString(),
+            messageId: message._id.toString(),
+          },
+        };
+
         await sendToUser(
           userId,
-          {
-            title: isGroup ? room.name : senderName,
-            body: isGroup ? `${senderName}: ${text}` : text,
-            icon: avatarFor(
-              isGroup ? room.groupAvatarUrl : message.sender.avatarUrl,
-            ),
-            tag: `room:${room._id}`,
-            data: {
-              roomId: room._id.toString(),
-              messageId: message._id.toString(),
-            },
-          },
+          (sub) =>
+            withEncryptedPreview(base, {
+              plain,
+              userId,
+              sub,
+              showPreview,
+              isGroup,
+              senderName,
+            }),
           { deviceIds },
         );
       }),
