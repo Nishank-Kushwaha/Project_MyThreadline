@@ -56,8 +56,8 @@ export function EncryptionStatus() {
   }
 
   return (
-    <div className="space-y-3 rounded-xl border border-border bg-muted/40 p-4">
-      <div className="flex items-start gap-3">
+    <div className="flex min-h-0 flex-col space-y-3 rounded-xl border border-border bg-muted/40 p-4">
+      <div className="flex shrink-0 items-start gap-3">
         {status === "ready" ? (
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
         ) : status === "error" ? (
@@ -92,41 +92,47 @@ export function EncryptionStatus() {
       </div>
 
       {status === "ready" && others.length > 0 && (
-        <div className="space-y-2 border-t border-border pt-3">
-          <p className="text-xs font-medium text-muted-foreground">
+        <div className="flex min-h-0 flex-col border-t border-border pt-3">
+          <p className="mb-2 shrink-0 text-xs font-medium text-muted-foreground">
             Your other devices
           </p>
 
-          {others.map((key) => (
-            <div key={key.deviceId} className="flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <p className="break-all font-mono text-xs">{key.fingerprint}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  Added {new Date(key.createdAt).toLocaleDateString()}
-                </p>
+          <div className="max-h-18.75 space-y-2 overflow-y-auto overscroll-contain pr-1 scrollbar-thin">
+            {others.map((key) => (
+              <div key={key.deviceId} className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="break-all font-mono text-xs">
+                    {key.fingerprint}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Added {new Date(key.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                  aria-label="Remove device"
+                  title="Remove device"
+                  onClick={() => remove(key.deviceId)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
+            ))}
+          </div>
 
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:text-destructive"
-                aria-label="Remove device"
-                title="Remove device"
-                onClick={() => remove(key.deviceId)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-
-          <p className="text-[11px] text-muted-foreground">
+          <p className="mt-2 shrink-0 text-[11px] text-muted-foreground">
             A removed device registers itself again if it's still signed in.
           </p>
         </div>
       )}
 
-      {listError && <p className="text-xs text-destructive">{listError}</p>}
+      {listError && (
+        <p className="shrink-0 text-xs text-destructive">{listError}</p>
+      )}
     </div>
   );
 }

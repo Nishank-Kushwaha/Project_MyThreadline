@@ -417,7 +417,7 @@ export default function Profile() {
         <div className="flex flex-col gap-4 sm:gap-6 lg:col-span-8 lg:h-full lg:min-h-0 xl:col-span-9">
           <div className="grid gap-4 sm:gap-6 md:grid-cols-3 lg:shrink-0">
             {/* End-to-end encryption and registered devices */}
-            <Card id="encryption" className="scroll-mt-6">
+            <Card id="encryption" className="flex h-full flex-col scroll-mt-6">
               <CardHeader className={HEADER}>
                 <CardTitle className="flex items-center gap-2">
                   <ShieldCheck className="h-5 w-5 text-primary" />
@@ -429,7 +429,7 @@ export default function Profile() {
                 </CardDescription>
               </CardHeader>
 
-              <CardContent className={CONTENT}>
+              <CardContent className={cn(CONTENT, "flex-1 min-h-0")}>
                 <EncryptionStatus />
               </CardContent>
             </Card>
@@ -491,7 +491,6 @@ export default function Profile() {
                 )}
               </CardContent>
             </Card>
-
             {/* Password */}
             <Card id="password" className="scroll-mt-6">
               <CardHeader className={HEADER}>
