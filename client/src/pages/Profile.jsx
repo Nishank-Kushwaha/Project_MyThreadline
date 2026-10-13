@@ -471,7 +471,7 @@ export default function Profile() {
                   <div className="flex justify-end">
                     <Button
                       type="submit"
-                      className="w-full sm:w-auto"
+                      className="w-full"
                       disabled={nameStatus.loading}
                     >
                       {nameStatus.loading ? "Saving…" : "Save"}
@@ -551,7 +551,7 @@ export default function Profile() {
                   <div className="flex justify-end">
                     <Button
                       type="submit"
-                      className="w-full sm:w-auto"
+                      className="w-full"
                       disabled={passwordStatus.loading}
                     >
                       {passwordStatus.loading ? "Updating…" : "Update password"}
