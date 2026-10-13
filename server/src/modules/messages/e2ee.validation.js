@@ -163,4 +163,24 @@ async function validateEnvelope(raw, { room, userId, deviceId }) {
   };
 }
 
-export { allMembersHaveDeviceKeys, validateEnvelope, viewForUser };
+// An encrypted reaction: 12-byte iv, and the sealed 64-byte block + 16-byte tag.
+// The fixed length means the size doesn't reveal which emoji it is.
+function validateReaction(raw) {
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    !isBase64Url(raw.iv, 16) ||
+    !isBase64Url(raw.ciphertext, 107)
+  ) {
+    throw invalid("Invalid reaction");
+  }
+
+  return { iv: raw.iv, ciphertext: raw.ciphertext };
+}
+
+export {
+  allMembersHaveDeviceKeys,
+  validateEnvelope,
+  validateReaction,
+  viewForUser,
+};

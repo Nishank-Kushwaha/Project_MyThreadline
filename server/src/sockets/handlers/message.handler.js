@@ -8,6 +8,7 @@ import {
 import {
   allMembersHaveDeviceKeys,
   validateEnvelope,
+  validateReaction,
   viewForUser,
 } from "../../modules/messages/e2ee.validation.js";
 
@@ -196,72 +197,102 @@ function registerMessageHandlers(io, socket) {
     }
   });
 
-  // One reaction per user per message: same emoji tapped again -> remove
-  // (toggle off); a different emoji -> replace; no prior reaction -> add.
-  socket.on("message:react", async ({ roomId, messageId, emoji }, callback) => {
-    try {
-      if (!emoji) throw new ApiError(400, "emoji is required");
+  // One reaction per user per message. On plain messages the server compares
+  // emoji (same again = remove, different = replace). On encrypted messages it
+  // can't read the emoji, so the client says what to do:
+  //   { reaction: { iv, ciphertext } }  set or replace mine
+  //   { remove: true }                  remove mine
+  socket.on(
+    "message:react",
+    async ({ roomId, messageId, emoji, reaction, remove }, callback) => {
+      try {
+        const room = await Room.findOne({
+          _id: roomId,
+          "members.userId": socket.userId,
+        });
 
-      const room = await Room.findOne({
-        _id: roomId,
-        "members.userId": socket.userId,
-      });
+        if (!room) {
+          throw new ApiError(403, "You are not a member of this room");
+        }
 
-      if (!room) {
-        throw new ApiError(403, "You are not a member of this room");
+        const message = await Message.findOne({
+          _id: messageId,
+          roomId,
+          type: { $ne: "system" },
+        });
+
+        if (!message) {
+          throw new ApiError(404, "Message not found");
+        }
+
+        if (message.deletedAt) {
+          throw new ApiError(400, "Cannot react to a deleted message");
+        }
+
+        const existingIndex = message.reactions.findIndex(
+          (r) => r.userId.toString() === socket.userId,
+        );
+
+        if (message.encrypted) {
+          // A readable emoji here would defeat the point.
+          if (emoji) {
+            throw new ApiError(
+              400,
+              "Reactions on encrypted messages must be encrypted",
+            );
+          }
+
+          if (existingIndex !== -1) message.reactions.splice(existingIndex, 1);
+
+          if (!remove) {
+            message.reactions.push({
+              userId: socket.userId,
+              ...validateReaction(reaction),
+            });
+          }
+        } else {
+          if (reaction) throw new ApiError(400, "This message isn't encrypted");
+
+          if (remove) {
+            if (existingIndex !== -1) {
+              message.reactions.splice(existingIndex, 1);
+            }
+          } else {
+            if (!emoji) throw new ApiError(400, "emoji is required");
+
+            if (
+              existingIndex !== -1 &&
+              message.reactions[existingIndex].emoji === emoji
+            ) {
+              message.reactions.splice(existingIndex, 1); // toggle off
+            } else if (existingIndex !== -1) {
+              message.reactions[existingIndex].emoji = emoji; // replace
+            } else {
+              message.reactions.push({ userId: socket.userId, emoji }); // add
+            }
+          }
+        }
+
+        await message.save();
+
+        await message.populate("reactions.userId", "name");
+
+        // Send updated reactions to everyone in the room
+        io.to(roomId).emit("message:reaction-update", {
+          roomId,
+          messageId,
+          reactions: message.reactions,
+        });
+
+        callback?.({ success: true });
+      } catch (err) {
+        callback?.({
+          success: false,
+          message: err.message,
+        });
       }
-
-      const message = await Message.findOne({
-        _id: messageId,
-        roomId,
-        type: { $ne: "system" },
-      });
-
-      if (!message) {
-        throw new ApiError(404, "Message not found");
-      }
-
-      if (message.deletedAt) {
-        throw new ApiError(400, "Cannot react to a deleted message");
-      }
-
-      const existingIndex = message.reactions.findIndex(
-        (r) => r.userId.toString() === socket.userId,
-      );
-
-      if (
-        existingIndex !== -1 &&
-        message.reactions[existingIndex].emoji === emoji
-      ) {
-        message.reactions.splice(existingIndex, 1); // toggle off
-      } else if (existingIndex !== -1) {
-        message.reactions[existingIndex].emoji = emoji; // replace
-      } else {
-        message.reactions.push({
-          userId: socket.userId,
-          emoji,
-        }); // add
-      }
-
-      await message.save();
-
-      await message.populate("reactions.userId", "name");
-
-      // Send updated reactions to everyone in the room
-      io.to(roomId).emit("message:reaction-update", {
-        roomId,
-        messageId,
-        reactions: message.reactions,
-      });
-
-      callback?.({ success: true });
-    } catch (err) {
-      callback?.({
-        success: false,
-        message: err.message,
-      });
-    }
-  });
+    },
+  );
 
   // Sender-only, within the edit window, and never on an already-deleted message.
   socket.on(

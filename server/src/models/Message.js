@@ -88,7 +88,17 @@ const messageSchema = new Schema(
     reactions: [
       {
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-        emoji: { type: String, required: true },
+        // Plain messages store the emoji itself. Encrypted messages store it
+        // sealed (iv + ciphertext): only people who can read the message can
+        // open it.
+        emoji: {
+          type: String,
+          required: function () {
+            return !this.ciphertext;
+          },
+        },
+        iv: String,
+        ciphertext: String,
       },
     ],
 

@@ -21,8 +21,10 @@ import {
 } from "@/lib/e2ee/directory";
 import {
   buildOutgoingMessage,
+  buildReactionRequest,
   decryptMessage,
   decryptMessages,
+  decryptReactions,
 } from "@/lib/e2ee/messages";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence
@@ -79,6 +81,10 @@ export function ChatWindow({
   const lastMessageIdRef = useRef(null);
   const activeRoomRef = useRef(room.id);
   activeRoomRef.current = room.id;
+
+  const messagesRef = useRef([]); // latest messages, for use inside socket handlers
+  messagesRef.current = messages;
+  const reactionSeq = useRef({}); // messageId -> newest reaction update number
 
   const recipientCount = room.memberCount - 1; // everyone except me
 
@@ -259,12 +265,28 @@ export function ChatWindow({
     };
     const handleDelivered = receiptHandler(["deliveredTo"]);
     const handleSeenUpdate = receiptHandler(["seenBy", "deliveredTo"]); // seen implies delivered
-    // A reaction changed on some message in this room — replace just that
-    // message's reactions array; everything else about it stays untouched.
-    const handleReactionUpdate = ({ roomId, messageId, reactions }) => {
+    // A reaction changed on some message in this room. Sealed reactions are
+    // opened here with that message's secret.
+    const handleReactionUpdate = async ({ roomId, messageId, reactions }) => {
       if (roomId !== room.id) return;
+
+      const target = messagesRef.current.find((m) => m._id === messageId);
+      if (!target) return;
+
+      // Decrypting is async: only the newest update for a message may win.
+      const seq = (reactionSeq.current[messageId] =
+        (reactionSeq.current[messageId] ?? 0) + 1);
+
+      const shown = await decryptReactions(reactions, {
+        secret: target.secret,
+        roomId: room.id,
+        messageId,
+      });
+
+      if (reactionSeq.current[messageId] !== seq) return;
+
       setMessages((prev) =>
-        prev.map((m) => (m._id === messageId ? { ...m, reactions } : m)),
+        prev.map((m) => (m._id === messageId ? { ...m, reactions: shown } : m)),
       );
     };
 
@@ -282,6 +304,7 @@ export function ChatWindow({
 
       let newText = text;
       let decrypt;
+      let secret;
 
       if (e2ee) {
         const readable = await decryptMessage(
@@ -290,6 +313,7 @@ export function ChatWindow({
         );
         newText = readable.text;
         decrypt = readable.decrypt;
+        secret = readable.secret;
       }
 
       setMessages((prev) =>
@@ -299,6 +323,7 @@ export function ChatWindow({
                 ...m,
                 text: newText,
                 e2ee: e2ee ?? m.e2ee,
+                secret: secret ?? m.secret,
                 decrypt: decrypt ?? m.decrypt,
                 editedAt,
               }
@@ -470,15 +495,41 @@ export function ChatWindow({
     }
   };
 
-  const handleReact = (messageId, emoji) => {
+  const handleReact = async (messageId, emoji) => {
     if (!socket) return;
-    socket.emit(
-      "message:react",
-      { roomId: room.id, messageId, emoji },
-      (ack) => {
-        if (!ack?.success) console.error("Reaction failed:", ack?.message);
-      },
-    );
+
+    const message = messages.find((m) => m._id === messageId);
+    if (!message) return;
+
+    try {
+      const payload = await buildReactionRequest({
+        message,
+        emoji,
+        roomId: room.id,
+        currentUserId: currentUser.id,
+      });
+
+      const ack = await new Promise((resolve) => {
+        socket
+          .timeout(10000)
+          .emit(
+            "message:react",
+            { roomId: room.id, messageId, ...payload },
+            (err, response) =>
+              resolve(
+                err
+                  ? { success: false, message: "No response from the server." }
+                  : response,
+              ),
+          );
+      });
+
+      if (!ack?.success) {
+        setSendError(ack?.message || "Couldn't save that reaction.");
+      }
+    } catch (err) {
+      setSendError(err.message || "Couldn't save that reaction.");
+    }
   };
 
   const handleEditMessage = async (messageId, text) => {
@@ -491,7 +542,12 @@ export function ChatWindow({
 
       // An edit of an encrypted message is encrypted for every current device.
       if (original?.encrypted) {
-        payload = await buildOutgoingMessage({ room, currentUser, text });
+        payload = await buildOutgoingMessage({
+          room,
+          currentUser,
+          text,
+          secret: original.secret ?? undefined,
+        });
         if (!payload.e2ee) throw new Error("Couldn't encrypt that edit.");
       }
 

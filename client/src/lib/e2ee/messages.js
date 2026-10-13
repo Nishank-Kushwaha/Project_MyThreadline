@@ -1,13 +1,24 @@
 import { getIdentity } from "./identity";
 import { getRoomEncryption } from "./directory";
-import { decryptEnvelope, encryptEnvelope } from "./crypto";
+import {
+  decryptEnvelope,
+  decryptReaction,
+  encryptEnvelope,
+  encryptReaction,
+  generateMessageSecret,
+} from "./crypto";
 
 export const MAX_TEXT_LENGTH = 4000;
 export const ENCRYPTED_PREVIEW = "🔒 Encrypted message";
 
 // Decides how to send: -> { e2ee } for an encrypted message, or { text } for a
 // chat that can't be encrypted yet. Throws with a readable message.
-export async function buildOutgoingMessage({ room, currentUser, text }) {
+export async function buildOutgoingMessage({
+  room,
+  currentUser,
+  text,
+  secret,
+}) {
   if (text.length > MAX_TEXT_LENGTH) {
     throw new Error(`Messages can be up to ${MAX_TEXT_LENGTH} characters.`);
   }
@@ -35,7 +46,7 @@ export async function buildOutgoingMessage({ room, currentUser, text }) {
 
   const envelope = await encryptEnvelope({
     roomId: room.id,
-    payload: { text },
+    payload: { text, secret: secret ?? generateMessageSecret() },
     sender: {
       userId: currentUser.id,
       deviceId: identity.deviceId,
@@ -49,7 +60,8 @@ export async function buildOutgoingMessage({ room, currentUser, text }) {
 }
 
 // Plaintext and system messages come back unchanged. Encrypted ones come back
-// with `text` filled in and `decrypt`: "ok" | "failed" | "other-device".
+// with `text` filled in, `secret` (used for reactions), their reactions
+// decrypted, and `decrypt`: "ok" | "failed" | "other-device" | "not-recipient".
 export async function decryptMessage(message, { roomId, userId }) {
   if (!message.encrypted || !message.e2ee) return message;
 
@@ -63,14 +75,33 @@ export async function decryptMessage(message, { roomId, userId }) {
       me: identity,
     });
 
-    return { ...message, text: payload.text, decrypt: "ok" };
+    const secret = payload.secret ?? null;
+
+    return {
+      ...message,
+      text: payload.text,
+      secret,
+      reactions: await decryptReactions(message.reactions, {
+        secret,
+        roomId,
+        messageId: message._id,
+      }),
+      decrypt: "ok",
+    };
   } catch (err) {
     const reasons = {
       "not-for-this-device": "other-device",
       "not-a-recipient": "not-recipient",
     };
 
-    return { ...message, text: "", decrypt: reasons[err.reason] ?? "failed" };
+    return {
+      ...message,
+      text: "",
+      secret: null,
+      // Sealed reactions can't be opened without the message; plain ones can.
+      reactions: (message.reactions ?? []).filter((r) => !r.ciphertext),
+      decrypt: reasons[err.reason] ?? "failed",
+    };
   }
 }
 
@@ -94,4 +125,69 @@ export async function decryptPreview(lastMessage, { roomId, userId }) {
     console.error("[e2ee] couldn't decrypt a sidebar preview:", err);
     return ENCRYPTED_PREVIEW;
   }
+}
+
+// Stored reactions -> the { userId, emoji } shape the UI draws. Plain ones pass
+// through; sealed ones are opened with the message secret and dropped if that
+// fails (wrong secret, or tampered with).
+export async function decryptReactions(
+  reactions = [],
+  { secret, roomId, messageId },
+) {
+  const opened = await Promise.all(
+    reactions.map(async (reaction) => {
+      if (!reaction.ciphertext) return reaction;
+      if (!secret) return null;
+
+      try {
+        const reactorId = String(reaction.userId?._id ?? reaction.userId);
+
+        const emoji = await decryptReaction({
+          secret,
+          roomId,
+          messageId,
+          reactorId,
+          reaction,
+        });
+
+        return { userId: reaction.userId, emoji };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return opened.filter(Boolean);
+}
+
+// What to send for a reaction: { emoji } on a plain message (the server
+// toggles), or for an encrypted one either { remove: true } or
+// { reaction: { iv, ciphertext } }.
+export async function buildReactionRequest({
+  message,
+  emoji,
+  roomId,
+  currentUserId,
+}) {
+  if (!message.encrypted) return { emoji };
+
+  if (!message.secret) {
+    throw new Error("Reactions aren't available on this message.");
+  }
+
+  const mine = (message.reactions ?? []).find(
+    (r) => String(r.userId?._id ?? r.userId) === currentUserId,
+  );
+
+  if (mine?.emoji === emoji) return { remove: true }; // same emoji again
+
+  return {
+    reaction: await encryptReaction({
+      secret: message.secret,
+      roomId,
+      messageId: message._id,
+      reactorId: currentUserId,
+      emoji,
+    }),
+  };
 }

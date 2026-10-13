@@ -6,6 +6,8 @@ const decoder = new TextDecoder();
 const VERSION = 1;
 const CURVE = { name: "ECDH", namedCurve: "P-256" };
 
+const REACTION_BLOCK = 64;
+
 export class DecryptError extends Error {
   constructor(reason) {
     super(reason);
@@ -233,4 +235,111 @@ export async function decryptEnvelope({ roomId, envelope, senderUserId, me }) {
   } finally {
     messageKeyBytes.fill(0);
   }
+}
+
+// ---------- Reactions ----------
+// Every message carries a random 32-byte "secret" inside its encrypted body.
+// Everyone who can read the message can derive the reaction key from it, and
+// nobody else can.
+
+export function generateMessageSecret() {
+  return bytesToBase64Url(randomBytes(32));
+}
+
+async function deriveReactionKey(secret, roomId, messageId) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    base64UrlToBytes(secret),
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(32),
+      info: encoder.encode(
+        `threadline-e2ee/v1/reaction-key|${roomId}|${messageId}`,
+      ),
+    },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+// Binds a reaction to its chat, its message AND the person who made it, so it
+// can't be moved to another message or attributed to someone else.
+const reactionAad = (roomId, messageId, reactorId) =>
+  encoder.encode(
+    `threadline-e2ee/v1/reaction|${roomId}|${messageId}|${reactorId}`,
+  );
+
+export async function encryptReaction({
+  secret,
+  roomId,
+  messageId,
+  reactorId,
+  emoji,
+}) {
+  const bytes = encoder.encode(emoji);
+
+  if (bytes.length === 0 || bytes.length > REACTION_BLOCK - 1) {
+    throw new Error("That reaction is too long.");
+  }
+
+  // Padded to a fixed size so the ciphertext length doesn't give the emoji away.
+  const block = new Uint8Array(REACTION_BLOCK);
+  block[0] = bytes.length;
+  block.set(bytes, 1);
+
+  const key = await deriveReactionKey(secret, roomId, messageId);
+  const iv = randomBytes(12);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv,
+      additionalData: reactionAad(roomId, messageId, reactorId),
+    },
+    key,
+    block,
+  );
+
+  return {
+    iv: bytesToBase64Url(iv),
+    ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)),
+  };
+}
+
+export async function decryptReaction({
+  secret,
+  roomId,
+  messageId,
+  reactorId,
+  reaction,
+}) {
+  const key = await deriveReactionKey(secret, roomId, messageId);
+
+  const block = new Uint8Array(
+    await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: base64UrlToBytes(reaction.iv),
+        additionalData: reactionAad(roomId, messageId, reactorId),
+      },
+      key,
+      base64UrlToBytes(reaction.ciphertext),
+    ),
+  );
+
+  const length = block[0];
+  if (length === 0 || length > REACTION_BLOCK - 1) {
+    throw new Error("Invalid reaction");
+  }
+
+  return decoder.decode(block.slice(1, 1 + length));
 }
