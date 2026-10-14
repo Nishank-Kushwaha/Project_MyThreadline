@@ -19,6 +19,18 @@ import {
 import { useE2EE } from "@/features/e2ee/E2EEContext";
 import { decryptPreview } from "@/lib/e2ee/messages";
 
+// Sidebar width limits for md+ screens (like WhatsApp Web)
+const SIDEBAR_MIN = 280;
+const SIDEBAR_DEFAULT = 320; // same as the old w-80
+const SIDEBAR_KEY = "threadline:sidebar-width";
+
+// The sidebar can grow up to half of the screen width
+const getSidebarMax = () =>
+  Math.max(SIDEBAR_MIN, Math.floor(window.innerWidth / 2));
+
+const clampSidebar = (width) =>
+  Math.min(Math.max(width, SIDEBAR_MIN), getSidebarMax());
+
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const socket = useSocket();
@@ -30,6 +42,78 @@ export default function Dashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [previews, setPreviews] = useState({}); // lastMessage id -> decrypted preview text
+
+  // Resizable sidebar (laptop). Remembered between visits.
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(SIDEBAR_KEY));
+      return clampSidebar(saved || SIDEBAR_DEFAULT);
+    } catch {
+      return SIDEBAR_DEFAULT;
+    }
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  // Save once the drag has finished, not on every pixel
+  useEffect(() => {
+    if (isResizing) return;
+    try {
+      localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
+    } catch {
+      /* storage unavailable: width just won't be remembered */
+    }
+  }, [sidebarWidth, isResizing]);
+
+  // Window got smaller: pull the sidebar back inside the limits
+  useEffect(() => {
+    const onResize = () => setSidebarWidth((w) => clampSidebar(w));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // While dragging: resize cursor everywhere, and no accidental text selection
+  useEffect(() => {
+    if (!isResizing) return;
+    const { cursor, userSelect } = document.body.style;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = cursor;
+      document.body.style.userSelect = userSelect;
+    };
+  }, [isResizing]);
+
+  const startResize = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    setIsResizing(true);
+
+    const onMove = (ev) =>
+      setSidebarWidth(clampSidebar(startWidth + ev.clientX - startX));
+    const onUp = () => {
+      setIsResizing(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
+
+  // Keyboard: arrows resize (Shift = bigger steps), Home/End jump to the limits
+  const onHandleKeyDown = (e) => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === "ArrowLeft") setSidebarWidth((w) => clampSidebar(w - step));
+    else if (e.key === "ArrowRight")
+      setSidebarWidth((w) => clampSidebar(w + step));
+    else if (e.key === "Home") setSidebarWidth(SIDEBAR_MIN);
+    else if (e.key === "End") setSidebarWidth(getSidebarMax());
+    else return;
+    e.preventDefault();
+  };
 
   // Keep the sidebar live for EVERY room (preview, unread badge, ordering).
   useEffect(() => {
@@ -412,9 +496,10 @@ export default function Dashboard() {
       {/* Small screens: fixed drawer that slides in/out.
           md and up: normal static column, always visible. */}
       <aside
+        style={{ "--sidebar-w": `${sidebarWidth}px` }}
         className={cn(
           "fixed inset-y-0 left-0 z-40 flex w-80 max-w-[85vw] shrink-0 flex-col border-r border-border bg-background transition-transform duration-200",
-          "md:static md:z-auto md:max-w-none md:translate-x-0",
+          "md:relative md:z-auto md:w-(--sidebar-w) md:max-w-none md:translate-x-0",
           isSidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
@@ -466,6 +551,33 @@ export default function Dashboard() {
           </Button>
         </div>
       </aside>
+
+      {/* Drag handle between the list and the chat (md and up only).
+          Double-click resets the width. */}
+      <div className="relative hidden w-0 shrink-0 md:block">
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize conversations"
+          aria-valuenow={sidebarWidth}
+          aria-valuemin={SIDEBAR_MIN}
+          aria-valuemax={getSidebarMax()}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+          onKeyDown={onHandleKeyDown}
+          className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize touch-none outline-none"
+        >
+          <span
+            className={cn(
+              "pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary transition-opacity",
+              isResizing
+                ? "opacity-100"
+                : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+            )}
+          />
+        </div>
+      </div>
 
       {/* min-w-0 stops long messages from stretching this column past the screen */}
       <main className="min-w-0 flex-1">
