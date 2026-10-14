@@ -46,7 +46,7 @@ const STRENGTH_COLORS = [
   "bg-emerald-500",
 ];
 
-export function BackupSettings() {
+export function BackupSettings({ className }) {
   const { user } = useAuth();
   const { status, keysChanged } = useE2EE();
 
@@ -174,7 +174,10 @@ export function BackupSettings() {
     </button>
   );
 
-  const card = "space-y-3 rounded-xl border border-border bg-muted/40 p-4";
+  const card = cn(
+    "flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4",
+    className,
+  );
 
   if (status !== "ready") return null;
 
@@ -233,7 +236,7 @@ export function BackupSettings() {
         backup.phase === "restore" ||
         backup.phase === "changed" ||
         isChanging) && (
-        <div className="space-y-3 border-t border-border pt-3">
+        <div className="flex flex-1 flex-col gap-3 border-t border-border pt-3">
           {isChanging && (
             <PassphraseField
               id="oldPassphrase"
@@ -308,7 +311,7 @@ export function BackupSettings() {
             </label>
           )}
 
-          <div className="flex gap-2">
+          <div className="mt-auto flex gap-2 pt-1">
             {backup.phase === "none" && (
               <Button
                 size="sm"
@@ -359,7 +362,12 @@ export function BackupSettings() {
       )}
 
       {backup.phase === "on" && !isChanging && (
-        <Button size="sm" variant="outline" onClick={() => setIsChanging(true)}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-auto self-start"
+          onClick={() => setIsChanging(true)}
+        >
           Change passphrase
         </Button>
       )}
