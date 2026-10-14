@@ -346,6 +346,11 @@ export default function Dashboard() {
     socket?.emit("message:seen", { roomId: activeRoomId });
   }, [rooms, activeRoomId, socket]);
 
+  // A restored backup can make older previews readable: decrypt them again.
+  useEffect(() => {
+    setPreviews({});
+  }, [e2ee.historyVersion]);
+
   // Decrypt the sidebar preview of rooms whose last message is encrypted. The
   // server only holds ciphertext, so each browser reads it for itself.
   useEffect(() => {

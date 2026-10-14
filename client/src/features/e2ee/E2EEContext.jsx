@@ -30,6 +30,7 @@ export function E2EEProvider({ children }) {
   const { user } = useAuth();
   const [state, setState] = useState(IDLE);
   const [attempt, setAttempt] = useState(0);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     if (!user?.id) {
@@ -80,8 +81,16 @@ export function E2EEProvider({ children }) {
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
+  // Called after a restore: reload the key set and let chats re-read history.
+  const keysChanged = useCallback(() => {
+    clearIdentityCache();
+    setHistoryVersion((n) => n + 1);
+  }, []);
+
   return (
-    <E2EEContext.Provider value={{ ...state, retry }}>
+    <E2EEContext.Provider
+      value={{ ...state, retry, historyVersion, keysChanged }}
+    >
       {children}
     </E2EEContext.Provider>
   );

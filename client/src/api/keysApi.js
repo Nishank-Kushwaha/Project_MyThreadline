@@ -9,3 +9,13 @@ export const listUserDeviceKeysRequest = (userId) =>
 
 export const removeDeviceKeyRequest = (deviceId) =>
   api.delete(`/keys/device/${deviceId}`);
+
+export const getBackupRequest = () => api.get("/keys/backup");
+
+export const createBackupRequest = (data) => api.put("/keys/backup", data);
+
+export const addBackupEntryRequest = (entry) =>
+  api.post("/keys/backup/entries", { entry });
+
+export const changeBackupPassphraseRequest = (data) =>
+  api.put("/keys/backup/passphrase", data);

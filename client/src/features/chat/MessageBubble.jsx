@@ -450,7 +450,7 @@ export function MessageBubble({
                   <p className="flex items-center gap-1.5 text-sm italic opacity-80">
                     <Lock className="h-3.5 w-3.5 shrink-0" />
                     {message.decrypt === "other-device"
-                      ? "Sent before this device was set up, so it can't be read here"
+                      ? "Sent before this device was set up. Restore your backup in Profile to read it."
                       : message.decrypt === "not-recipient"
                         ? "Sent before you joined this chat"
                         : "Couldn't decrypt this message"}

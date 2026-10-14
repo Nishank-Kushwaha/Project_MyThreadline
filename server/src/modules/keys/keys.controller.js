@@ -56,4 +56,62 @@ async function removeDeviceKey(req, res, next) {
   }
 }
 
-export { publishDeviceKey, listMyKeys, listUserKeys, removeDeviceKey };
+async function getBackup(req, res, next) {
+  try {
+    const backup = await keysService.getBackup(req.userId);
+
+    res.status(200).json({
+      success: true,
+      backup,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createBackup(req, res, next) {
+  try {
+    await keysService.createBackup(req.userId, req.body);
+
+    res.status(201).json({
+      success: true,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addBackupEntry(req, res, next) {
+  try {
+    await keysService.addBackupEntry(req.userId, req.body.entry);
+
+    res.status(200).json({
+      success: true,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function changeBackupPassphrase(req, res, next) {
+  try {
+    await keysService.changeBackupPassphrase(req.userId, req.body);
+
+    res.status(200).json({
+      success: true,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export {
+  publishDeviceKey,
+  listMyKeys,
+  listUserKeys,
+  removeDeviceKey,
+  getBackup,
+  createBackup,
+  addBackupEntry,
+  changeBackupPassphrase,
+};

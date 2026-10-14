@@ -1,4 +1,4 @@
-import { getIdentity } from "./identity";
+import { getDecryptionIdentity, getIdentity } from "./identity";
 import { getRoomEncryption } from "./directory";
 import {
   decryptEnvelope,
@@ -66,7 +66,7 @@ export async function decryptMessage(message, { roomId, userId }) {
   if (!message.encrypted || !message.e2ee) return message;
 
   try {
-    const identity = await getIdentity(userId);
+    const identity = await getDecryptionIdentity(userId);
 
     const payload = await decryptEnvelope({
       roomId,
@@ -111,7 +111,7 @@ export const decryptMessages = (messages, context) =>
 // The sidebar preview of an encrypted last message. Always returns a string.
 export async function decryptPreview(lastMessage, { roomId, userId }) {
   try {
-    const identity = await getIdentity(userId);
+    const identity = await getDecryptionIdentity(userId);
 
     const payload = await decryptEnvelope({
       roomId,

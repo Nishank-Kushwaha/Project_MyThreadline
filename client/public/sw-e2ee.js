@@ -31,7 +31,7 @@
   // its own store later.
   function loadKeyRecord(userId) {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
+      const request = indexedDB.open(DB_NAME);
 
       request.onupgradeneeded = () => request.transaction.abort();
       request.onerror = () => reject(request.error);

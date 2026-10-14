@@ -10,5 +10,9 @@ router.put("/device", keysController.publishDeviceKey);
 router.get("/me", keysController.listMyKeys);
 router.get("/users/:userId", keysController.listUserKeys);
 router.delete("/device/:deviceId", keysController.removeDeviceKey);
+router.get("/backup", keysController.getBackup);
+router.put("/backup", keysController.createBackup);
+router.post("/backup/entries", keysController.addBackupEntry);
+router.put("/backup/passphrase", keysController.changeBackupPassphrase);
 
 export default router;

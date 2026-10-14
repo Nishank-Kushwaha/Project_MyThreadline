@@ -29,10 +29,12 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
+  CloudBackup,
 } from "lucide-react";
 import { subscribeToPush } from "@/lib/push";
 import ThemePicker from "@/components/ui/ThemePicker";
 import { EncryptionStatus } from "@/features/e2ee/EncryptionStatus";
+import { BackupSettings } from "@/features/e2ee/BackupSettings";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
@@ -431,6 +433,21 @@ export default function Profile() {
 
               <CardContent className={cn(CONTENT, "flex-1 min-h-0")}>
                 <EncryptionStatus />
+              </CardContent>
+            </Card>
+
+            {/* Backup Settings */}
+            <Card id="backup" className="flex h-full flex-col scroll-mt-6">
+              <CardHeader className={HEADER}>
+                <CardTitle className="flex items-center gap-2">
+                  <CloudBackup className="h-5 w-5 text-primary" />
+                  Backup
+                </CardTitle>
+                <CardDescription>bring back you lost history.</CardDescription>
+              </CardHeader>
+
+              <CardContent className={cn(CONTENT, "flex-1 min-h-0")}>
+                <BackupSettings />
               </CardContent>
             </Card>
 

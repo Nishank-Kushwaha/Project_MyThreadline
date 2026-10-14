@@ -168,33 +168,25 @@ export async function encryptEnvelope({ roomId, payload, sender, recipients }) {
   }
 }
 
-// me: { userId, deviceId, privateKey }
-export async function decryptEnvelope({ roomId, envelope, senderUserId, me }) {
-  if (envelope?.v !== VERSION) throw new DecryptError("unsupported-version");
-
-  const entry = envelope.keys.find(
-    (key) => key.userId === me.userId && key.deviceId === me.deviceId,
-  );
-
-  if (!entry) {
-    // No locks for me at all: I wasn't a member (or had no device) when this
-    // was sent. Locks for my other devices only: this device is newer.
-    const hasAnyOfMine = envelope.keys.some((key) => key.userId === me.userId);
-    throw new DecryptError(
-      hasAnyOfMine ? "not-for-this-device" : "not-a-recipient",
-    );
-  }
-
-  const dh1 = await ecdh(me.privateKey, entry.epk);
-  const dh2 = await ecdh(me.privateKey, envelope.spk);
+async function openEnvelope({
+  roomId,
+  envelope,
+  senderUserId,
+  userId,
+  deviceId,
+  privateKey,
+  entry,
+}) {
+  const dh1 = await ecdh(privateKey, entry.epk);
+  const dh2 = await ecdh(privateKey, envelope.spk);
 
   const info = wrapInfo({
     roomId,
     senderUserId,
     senderDeviceId: envelope.senderDeviceId,
     spk: envelope.spk,
-    recipientUserId: me.userId,
-    recipientDeviceId: me.deviceId,
+    recipientUserId: userId,
+    recipientDeviceId: deviceId,
     epk: entry.epk,
   });
 
@@ -235,6 +227,52 @@ export async function decryptEnvelope({ roomId, envelope, senderUserId, me }) {
   } finally {
     messageKeyBytes.fill(0);
   }
+}
+
+// me: { userId, keys: [{ deviceId, privateKey }] }  (the current key first, then
+// keys restored from the backup). The older { userId, deviceId, privateKey }
+// shape still works.
+
+export async function decryptEnvelope({ roomId, envelope, senderUserId, me }) {
+  if (envelope?.v !== VERSION) throw new DecryptError("unsupported-version");
+
+  const candidates = me.keys ?? [
+    { deviceId: me.deviceId, privateKey: me.privateKey },
+  ];
+
+  const mine = envelope.keys.filter((key) => key.userId === me.userId);
+
+  // No locks for me at all: I wasn't a member (or had no device) when this was
+  // sent.
+  if (mine.length === 0) throw new DecryptError("not-a-recipient");
+
+  // Locks for my devices exist, but none of the keys I have fit them.
+  const usable = candidates.filter((candidate) =>
+    mine.some((key) => key.deviceId === candidate.deviceId),
+  );
+  if (usable.length === 0) throw new DecryptError("not-for-this-device");
+
+  let lastError;
+
+  for (const candidate of usable) {
+    const entry = mine.find((key) => key.deviceId === candidate.deviceId);
+
+    try {
+      return await openEnvelope({
+        roomId,
+        envelope,
+        senderUserId,
+        userId: me.userId,
+        deviceId: candidate.deviceId,
+        privateKey: candidate.privateKey,
+        entry,
+      });
+    } catch (err) {
+      lastError = err; // wrong key for this lock: try the next one
+    }
+  }
+
+  throw lastError;
 }
 
 // ---------- Reactions ----------

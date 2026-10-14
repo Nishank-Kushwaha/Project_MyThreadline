@@ -184,7 +184,7 @@ export function ChatWindow({
     return () => {
       cancelled = true;
     };
-  }, [room.id, e2ee.status, currentUser.id]);
+  }, [room.id, e2ee.status, e2ee.historyVersion, currentUser.id]);
 
   // ---------- 2) Load older messages on scroll ----------
   const loadOlder = useCallback(async () => {

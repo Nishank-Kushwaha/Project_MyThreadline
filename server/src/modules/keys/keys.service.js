@@ -2,8 +2,12 @@ import { createECDH } from "node:crypto";
 import DeviceKey from "../../models/DeviceKey.js";
 import Room from "../../models/Room.js";
 import ApiError from "../../utils/ApiError.js";
+import KeyBackup from "../../models/KeyBackup.js";
 
 const MAX_DEVICES_PER_USER = 10;
+const MAX_BACKUP_ENTRIES = 50;
+const MIN_KDF_ITERATIONS = 600000;
+const MAX_KDF_ITERATIONS = 2000000;
 
 function shapeKey(key) {
   return {
@@ -42,6 +46,63 @@ function assertValidPublicKey(publicKey) {
   } catch {
     throw new ApiError(400, "Invalid public key");
   }
+}
+
+const isBase64Url = (value, { length, max = 600 } = {}) =>
+  typeof value === "string" &&
+  /^[A-Za-z0-9_-]+$/.test(value) &&
+  (length ? value.length === length : value.length > 0 && value.length <= max);
+
+const invalidBackup = () => new ApiError(400, "Invalid backup data");
+
+function validateKdf(kdf) {
+  if (
+    !kdf ||
+    kdf.name !== "PBKDF2-SHA256" ||
+    !Number.isInteger(kdf.iterations) ||
+    kdf.iterations < MIN_KDF_ITERATIONS ||
+    kdf.iterations > MAX_KDF_ITERATIONS ||
+    !isBase64Url(kdf.salt, { length: 22 })
+  ) {
+    throw invalidBackup();
+  }
+
+  return { name: kdf.name, iterations: kdf.iterations, salt: kdf.salt };
+}
+
+function validateWrapped(wrapped) {
+  if (
+    !wrapped ||
+    !isBase64Url(wrapped.iv, { length: 16 }) ||
+    !isBase64Url(wrapped.ciphertext, { max: 400 })
+  ) {
+    throw invalidBackup();
+  }
+
+  return { iv: wrapped.iv, ciphertext: wrapped.ciphertext };
+}
+
+function validateEntry(entry) {
+  if (!entry || typeof entry !== "object") throw invalidBackup();
+
+  assertValidDeviceId(entry.deviceId);
+  assertValidPublicKey(entry.publicKey);
+
+  if (
+    !isBase64Url(entry.epk, { length: 87 }) ||
+    !isBase64Url(entry.iv, { length: 16 }) ||
+    !isBase64Url(entry.sealed, { max: 400 })
+  ) {
+    throw invalidBackup();
+  }
+
+  return {
+    deviceId: entry.deviceId,
+    publicKey: entry.publicKey,
+    epk: entry.epk,
+    iv: entry.iv,
+    sealed: entry.sealed,
+  };
 }
 
 // Called by the browser after it creates (or re-creates) its key pair.
@@ -110,4 +171,74 @@ async function removeDeviceKey(userId, deviceId) {
   }
 }
 
-export { publishDeviceKey, listMyKeys, listUserKeys, removeDeviceKey };
+async function getBackup(userId) {
+  const backup = await KeyBackup.findOne({ userId }).lean();
+  if (!backup) return null;
+
+  return {
+    publicKey: backup.publicKey,
+    kdf: backup.kdf,
+    wrapped: backup.wrapped,
+    entries: backup.entries,
+    updatedAt: backup.updatedAt,
+  };
+}
+
+async function createBackup(userId, { publicKey, kdf, wrapped, entry }) {
+  assertValidPublicKey(publicKey);
+
+  try {
+    await KeyBackup.create({
+      userId,
+      publicKey,
+      kdf: validateKdf(kdf),
+      wrapped: validateWrapped(wrapped),
+      entries: [validateEntry(entry)],
+    });
+  } catch (err) {
+    if (err.code === 11000) {
+      throw new ApiError(409, "A backup already exists for this account");
+    }
+    throw err;
+  }
+}
+
+// Adds one device key to an existing backup (a no-op if it's already there).
+async function addBackupEntry(userId, entry) {
+  const clean = validateEntry(entry);
+
+  const backup = await KeyBackup.findOne({ userId });
+  if (!backup) throw new ApiError(404, "There's no backup yet");
+
+  if (backup.entries.some((e) => e.publicKey === clean.publicKey)) return;
+
+  if (backup.entries.length >= MAX_BACKUP_ENTRIES) {
+    throw new ApiError(409, "The backup is full");
+  }
+
+  backup.entries.push(clean);
+  await backup.save();
+}
+
+// The server can't check the old passphrase (it never sees it). The browser
+// proves it by successfully opening the old blob before sending the new one.
+async function changeBackupPassphrase(userId, { kdf, wrapped }) {
+  const result = await KeyBackup.updateOne(
+    { userId },
+    { kdf: validateKdf(kdf), wrapped: validateWrapped(wrapped) },
+  );
+
+  if (result.matchedCount === 0)
+    throw new ApiError(404, "There's no backup yet");
+}
+
+export {
+  publishDeviceKey,
+  listMyKeys,
+  listUserKeys,
+  removeDeviceKey,
+  getBackup,
+  createBackup,
+  addBackupEntry,
+  changeBackupPassphrase,
+};
