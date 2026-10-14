@@ -48,7 +48,7 @@ const STRENGTH_COLORS = [
 
 export function BackupSettings({ className }) {
   const { user } = useAuth();
-  const { status, keysChanged } = useE2EE();
+  const { status, keysChanged, historyVersion } = useE2EE();
 
   const [backup, setBackup] = useState({ phase: "loading" });
   const [passphrase, setPassphrase] = useState("");
@@ -72,7 +72,7 @@ export function BackupSettings({ className }) {
 
   useEffect(() => {
     if (status === "ready") load();
-  }, [status, load]);
+  }, [status, load, historyVersion]);
 
   const resetForm = () => {
     setPassphrase("");
@@ -104,7 +104,10 @@ export function BackupSettings({ className }) {
 
   const handleCreate = () =>
     run(
-      () => createBackup({ userId: user.id, passphrase }),
+      async () => {
+        await createBackup({ userId: user.id, passphrase });
+        keysChanged();
+      },
       () => "Backup is on, and this device is saved in it.",
     );
 

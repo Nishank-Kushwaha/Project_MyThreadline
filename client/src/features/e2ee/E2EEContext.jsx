@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useState,
+  useRef,
 } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -15,6 +16,7 @@ import { clearIdentityCache } from "@/lib/e2ee/identity";
 import { clearKeyDirectoryCache } from "@/lib/e2ee/directory";
 
 const E2EEContext = createContext(null);
+const CHANNEL_NAME = "threadline-e2ee";
 
 const IDLE = {
   status: "idle", // idle | loading | ready | error | unsupported
@@ -31,6 +33,7 @@ export function E2EEProvider({ children }) {
   const [state, setState] = useState(IDLE);
   const [attempt, setAttempt] = useState(0);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const channelRef = useRef(null);
 
   useEffect(() => {
     if (!user?.id) {
@@ -79,13 +82,39 @@ export function E2EEProvider({ children }) {
     };
   }, [user?.id, attempt]);
 
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  // Other tabs of this site tell us when they restored or created a backup, so
+  // this tab reloads its keys by itself instead of needing a manual refresh.
+  useEffect(() => {
+    if (!user?.id || typeof BroadcastChannel === "undefined") return;
 
-  // Called after a restore: reload the key set and let chats re-read history.
+    const channel = new BroadcastChannel(CHANNEL_NAME);
+    channelRef.current = channel;
+
+    channel.onmessage = (event) => {
+      if (
+        event.data?.type === "keys-changed" &&
+        event.data?.userId === user.id
+      ) {
+        clearIdentityCache();
+        setHistoryVersion((n) => n + 1);
+      }
+    };
+
+    return () => {
+      channel.close();
+      channelRef.current = null;
+    };
+  }, [user?.id]);
+
+  // Called after a restore or a new backup: reload the key set here, let chats
+  // re-read their history, and tell the other tabs to do the same.
   const keysChanged = useCallback(() => {
     clearIdentityCache();
     setHistoryVersion((n) => n + 1);
-  }, []);
+    channelRef.current?.postMessage({ type: "keys-changed", userId: user?.id });
+  }, [user?.id]);
+
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   return (
     <E2EEContext.Provider
