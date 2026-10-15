@@ -125,7 +125,7 @@ async function publishDeviceKey(userId, { deviceId, publicKey }) {
 
     try {
       const created = await DeviceKey.create({ userId, deviceId, publicKey });
-      return { key: shapeKey(created), created: true };
+      return { key: shapeKey(created), created: true, changed: false };
     } catch (err) {
       if (err.code !== 11000) throw err;
       existing = await find(); // another request created it first
@@ -133,13 +133,16 @@ async function publishDeviceKey(userId, { deviceId, publicKey }) {
   }
 
   // Same key again: nothing to do. A different key: record that it changed.
+  let changed = false;
+
   if (existing.publicKey !== publicKey) {
     existing.publicKey = publicKey;
     existing.keyVersion += 1;
     await existing.save();
+    changed = true;
   }
 
-  return { key: shapeKey(existing), created: false };
+  return { key: shapeKey(existing), created: false, changed };
 }
 
 async function listMyKeys(userId) {
@@ -232,6 +235,15 @@ async function changeBackupPassphrase(userId, { kdf, wrapped }) {
     throw new ApiError(404, "There's no backup yet");
 }
 
+// Every chat this user is in, for announcing a key change to the people in it.
+async function getRoomIdsOf(userId) {
+  const rooms = await Room.find({ "members.userId": userId })
+    .select("_id")
+    .lean();
+
+  return rooms.map((room) => room._id.toString());
+}
+
 export {
   publishDeviceKey,
   listMyKeys,
@@ -241,4 +253,5 @@ export {
   createBackup,
   addBackupEntry,
   changeBackupPassphrase,
+  getRoomIdsOf,
 };

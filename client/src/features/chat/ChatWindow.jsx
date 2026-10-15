@@ -6,15 +6,18 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Menu, Users } from "lucide-react";
+import { Menu, Shield, ShieldAlert, ShieldCheck, Users } from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
-import { formatLastSeen } from "@/lib/utils";
+import { cn, formatLastSeen } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
 import { EncryptionNotice } from "./EncryptionNotice";
 import { useE2EE } from "@/features/e2ee/E2EEContext";
+import { KeyChangeNotice } from "./KeyChangeNotice";
+import { useRoomVerification } from "@/features/e2ee/useVerification";
+import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
 import {
   clearRoomEncryptionCache,
   getRoomEncryption,
@@ -67,6 +70,7 @@ export function ChatWindow({
 
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [verifyUserId, setVerifyUserId] = useState(null);
 
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
@@ -87,6 +91,26 @@ export function ChatWindow({
   const reactionSeq = useRef({}); // messageId -> newest reaction update number
 
   const recipientCount = room.memberCount - 1; // everyone except me
+
+  const verification = useRoomVerification({
+    room,
+    currentUserId: currentUser.id,
+    socket,
+  });
+
+  // Verified contacts whose keys changed since you verified them.
+  const changedContacts = Object.values(verification.statuses).filter(
+    (status) => status.state === "changed",
+  );
+
+  const contactStatus =
+    room.type === "private" ? verification.statuses[room.otherUserId] : null;
+  const ContactShield =
+    contactStatus?.state === "verified"
+      ? ShieldCheck
+      : contactStatus?.state === "changed"
+        ? ShieldAlert
+        : Shield;
 
   const removeTyping = useCallback((userId) => {
     clearTimeout(expireTimers.current[userId]);
@@ -635,6 +659,28 @@ export function ChatWindow({
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         </div>
         {/* Private chats are always exactly 2 people, so there is nothing to manage. */}
+        {contactStatus && encryption === "active" && (
+          <button
+            onClick={() => setVerifyUserId(room.otherUserId)}
+            aria-label="Verify security code"
+            title={
+              contactStatus.state === "verified"
+                ? "Verified. View security code"
+                : contactStatus.state === "changed"
+                  ? "Security code changed. Review it"
+                  : "Verify security code"
+            }
+            className={cn(
+              "flex shrink-0 items-center rounded-md p-1.5 hover:bg-accent",
+              contactStatus.state === "verified" && "text-emerald-500",
+              contactStatus.state === "changed" && "text-amber-500",
+              contactStatus.state === "unverified" &&
+                "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <ContactShield className="h-4 w-4" />
+          </button>
+        )}
         {room.type === "group" && (
           <button
             onClick={onOpenMembers}
@@ -651,6 +697,7 @@ export function ChatWindow({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4"
       >
+        <KeyChangeNotice changes={changedContacts} onReview={setVerifyUserId} />
         {!isLoading && encryption === "active" && (
           <EncryptionNotice
             kind="active"
@@ -708,6 +755,14 @@ export function ChatWindow({
       )}
 
       <MessageInput onSend={handleSend} onTyping={handleTyping} />
+      <SafetyNumberDialog
+        open={Boolean(verifyUserId)}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setVerifyUserId(null);
+        }}
+        me={{ id: currentUser.id, devices: verification.myDevices }}
+        contact={verifyUserId ? verification.statuses[verifyUserId] : null}
+      />
     </div>
   );
 }

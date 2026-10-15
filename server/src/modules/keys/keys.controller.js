@@ -1,13 +1,33 @@
 import * as keysService from "./keys.service.js";
 
+// Tells everyone who shares a chat with this user that their keys changed, so
+// open chats re-check their security codes right away. Never throws.
+async function announceKeyChange(req, userId) {
+  try {
+    const io = req.app.get("io");
+    if (!io) return;
+
+    const roomIds = await keysService.getRoomIdsOf(userId);
+
+    for (const roomId of roomIds) {
+      io.to(roomId).emit("keys:changed", { roomId, userId });
+    }
+  } catch (err) {
+    console.error("[keys] couldn't announce a key change:", err.message);
+  }
+}
+
 async function publishDeviceKey(req, res, next) {
   try {
     const { deviceId, publicKey } = req.body;
 
-    const { key, created } = await keysService.publishDeviceKey(req.userId, {
-      deviceId,
-      publicKey,
-    });
+    const { key, created, changed } = await keysService.publishDeviceKey(
+      req.userId,
+      { deviceId, publicKey },
+    );
+
+    // Not awaited: the browser doesn't need to wait for the announcement.
+    if (created || changed) announceKeyChange(req, req.userId);
 
     res.status(created ? 201 : 200).json({
       success: true,
@@ -17,7 +37,6 @@ async function publishDeviceKey(req, res, next) {
     next(err);
   }
 }
-
 async function listMyKeys(req, res, next) {
   try {
     const keys = await keysService.listMyKeys(req.userId);
@@ -47,6 +66,8 @@ async function listUserKeys(req, res, next) {
 async function removeDeviceKey(req, res, next) {
   try {
     await keysService.removeDeviceKey(req.userId, req.params.deviceId);
+
+    announceKeyChange(req, req.userId);
 
     res.status(200).json({
       success: true,

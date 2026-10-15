@@ -20,6 +20,9 @@ import {
   LogOut,
   ShieldOff,
   ArrowRightLeft,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,9 @@ import {
 } from "@/api/roomsApi";
 
 import { listUsersRequest } from "@/api/usersApi";
+
+import { useRoomVerification } from "@/features/e2ee/useVerification";
+import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
 
 // Lazy-loaded so the DiceBear collection stays out of the main bundle.
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
@@ -86,6 +92,7 @@ export function MembersPanel({
   const [showPhoto, setShowPhoto] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [verifyUserId, setVerifyUserId] = useState(null);
 
   const fileInputRef = useRef(null);
 
@@ -102,6 +109,8 @@ export function MembersPanel({
     members.find((m) => m.id === currentUserId)?.isCreator ?? false;
 
   const memberCount = isLoading ? room.memberCount : members.length;
+
+  const verification = useRoomVerification({ room, currentUserId, socket });
 
   /* ----------------------------- loading ----------------------------- */
 
@@ -640,6 +649,14 @@ export function MembersPanel({
                   const canDemote =
                     isAdmin && member.isAdmin && !isMe && !member.isCreator;
 
+                  const verifyState = verification.statuses[member.id]?.state;
+                  const VerifyIcon =
+                    verifyState === "verified"
+                      ? ShieldCheck
+                      : verifyState === "changed"
+                        ? ShieldAlert
+                        : Shield;
+
                   return (
                     <li
                       key={member.id}
@@ -672,6 +689,30 @@ export function MembersPanel({
                           </p>
                         )}
                       </div>
+
+                      {!isMe && verification.statuses[member.id] && (
+                        <button
+                          type="button"
+                          onClick={() => setVerifyUserId(member.id)}
+                          aria-label={`Verify ${member.name}`}
+                          title={
+                            verifyState === "verified"
+                              ? "Verified. View security code"
+                              : verifyState === "changed"
+                                ? "Security code changed. Review it"
+                                : "Verify security code"
+                          }
+                          className={cn(
+                            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-background",
+                            verifyState === "verified" && "text-emerald-500",
+                            verifyState === "changed" && "text-amber-500",
+                            verifyState === "unverified" &&
+                              "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <VerifyIcon className="h-4 w-4" />
+                        </button>
+                      )}
 
                       {canManage && (
                         <div className="flex shrink-0 items-center gap-1">
@@ -763,6 +804,15 @@ export function MembersPanel({
 
       {/* Confirm dialog (remove member / promote / remove photo) */}
       <ConfirmDialog config={confirm} onClose={() => setConfirm(null)} />
+
+      <SafetyNumberDialog
+        open={Boolean(verifyUserId)}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setVerifyUserId(null);
+        }}
+        me={{ id: currentUserId, devices: verification.myDevices }}
+        contact={verifyUserId ? verification.statuses[verifyUserId] : null}
+      />
 
       {/* Full-size group photo */}
       {showPhoto && info.avatarUrl && (

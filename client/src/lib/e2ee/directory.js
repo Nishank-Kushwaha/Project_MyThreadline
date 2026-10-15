@@ -68,3 +68,8 @@ export function clearRoomEncryptionCache(roomId) {
   if (roomId) roomCache.delete(roomId);
   else roomCache.clear();
 }
+
+// Forget one person's cached keys, so the next lookup asks the server again.
+export function clearUserKeysCache(userId) {
+  cache.delete(userId);
+}
