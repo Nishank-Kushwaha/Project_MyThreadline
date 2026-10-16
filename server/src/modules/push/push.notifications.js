@@ -165,7 +165,12 @@ async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
         const text =
           message.encrypted || !showPreview
             ? "New message"
-            : trimText(message.text);
+            : trimText(
+                message.text ||
+                  (message.media?.fileType?.startsWith("image/")
+                    ? "📷 Photo"
+                    : "📎 Attachment"),
+              );
 
         const base = {
           title: isGroup ? room.name : senderName,

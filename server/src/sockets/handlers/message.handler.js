@@ -39,7 +39,7 @@ function emitToMembers(io, room, event, buildPayload) {
 function registerMessageHandlers(io, socket) {
   // Fired when a user sends a message. The server saves it, updates the room's
   // lastMessage, and broadcasts it to everyone in the room (including the sender).
-  socket.on("message:send", async ({ roomId, text, e2ee }, callback) => {
+  socket.on("message:send", async ({ roomId, text, media, e2ee }, callback) => {
     try {
       const room = await Room.findOne({
         _id: roomId,
@@ -61,6 +61,14 @@ function registerMessageHandlers(io, socket) {
           );
         }
 
+        // If chat is E2EE, media cannot be sent unencrypted outside e2ee!
+        if (media) {
+          throw new ApiError(
+            400,
+            "Unencrypted media is not allowed in an end-to-end encrypted chat.",
+          );
+        }
+
         envelope = await validateEnvelope(e2ee, {
           room,
           userId: socket.userId,
@@ -76,8 +84,8 @@ function registerMessageHandlers(io, socket) {
         );
       }
 
-      if (!envelope && (!text || !text.trim())) {
-        throw new ApiError(400, "Message text is required");
+      if (!envelope && (!text || !text.trim()) && !media?.url) {
+        throw new ApiError(400, "Message text or media is required");
       }
 
       // Recipients who are online right now have received it the instant it's
@@ -92,7 +100,16 @@ function registerMessageHandlers(io, socket) {
         roomId,
         sender: socket.userId,
         encrypted: Boolean(envelope),
-        text: envelope ? "" : text.trim(),
+        text: envelope ? "" : (text?.trim() || ""),
+        ...(media && !envelope && {
+          media: {
+            url: media.url,
+            publicId: media.publicId || "",
+            fileName: media.fileName || "",
+            fileType: media.fileType || "",
+            fileSize: Number(media.fileSize) || 0,
+          },
+        }),
         ...(envelope && { e2ee: envelope }),
         deliveredTo,
       });
@@ -101,9 +118,18 @@ function registerMessageHandlers(io, socket) {
       room.members.forEach((member) => {
         if (member.userId.toString() !== socket.userId) member.unreadCount += 1;
       });
+
+      const plainTextPreview =
+        message.text ||
+        (media?.fileType?.startsWith("image/")
+          ? "📷 Photo"
+          : media?.fileName
+            ? `📎 ${media.fileName}`
+            : "📎 Attachment");
+
       room.lastMessage = {
         messageId: message._id,
-        text: message.text,
+        text: envelope ? "" : plainTextPreview,
         sender: socket.userId,
         createdAt: message.createdAt,
         encrypted: message.encrypted,

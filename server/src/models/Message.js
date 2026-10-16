@@ -17,10 +17,20 @@ const messageSchema = new Schema(
     text: {
       type: String,
       required: function () {
-        return !this.encrypted;
+        return !this.encrypted && !this.media?.url;
       },
       trim: true,
       default: "",
+    },
+
+    // Unencrypted media attachments (used only in non-E2EE chats).
+    // In E2EE chats, all media metadata and keys are encrypted inside `e2ee`.
+    media: {
+      url: { type: String, default: "" },
+      publicId: { type: String, default: "" },
+      fileName: { type: String, default: "" },
+      fileType: { type: String, default: "" },
+      fileSize: { type: Number, default: 0 },
     },
 
     // True for an end-to-end encrypted message. Its contents are in `e2ee`.

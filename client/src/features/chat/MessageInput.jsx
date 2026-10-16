@@ -6,12 +6,20 @@ import React, {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Paperclip, Send, X, File, Image as ImageIcon } from "lucide-react";
+import { formatFileSize } from "@/lib/e2ee/media";
 
-export function MessageInput({ onSend, onTyping }) {
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
+
+export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
   const [text, setText] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [filePreview, setFilePreview] = useState(null);
   const [isSending, setIsSending] = useState(false);
+  const [fileError, setFileError] = useState("");
+
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Grow with the text. The CSS max-h (8 lines) stops the growth,
   // and overflow-y-auto turns the box into a scroller after that.
@@ -25,8 +33,7 @@ export function MessageInput({ onSend, onTyping }) {
   // Re-fit on every text change (also shrinks it back after sending)
   useLayoutEffect(fit, [text, fit]);
 
-  // Re-fit when the box gets wider/narrower (e.g. the sidebar is dragged),
-  // because the text then wraps into a different number of lines
+  // Re-fit when the box gets wider/narrower (e.g. the sidebar is dragged)
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -41,6 +48,44 @@ export function MessageInput({ onSend, onTyping }) {
     return () => observer.disconnect();
   }, [fit]);
 
+  // Clean up object URL on file change or unmount
+  useEffect(() => {
+    return () => {
+      if (filePreview) URL.revokeObjectURL(filePreview);
+    };
+  }, [filePreview]);
+
+  const handleFileSelect = (e) => {
+    setFileError("");
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setFileError("File exceeds 15MB limit.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (filePreview) URL.revokeObjectURL(filePreview);
+
+    setSelectedFile(file);
+    if (file.type.startsWith("image/")) {
+      setFilePreview(URL.createObjectURL(file));
+    } else {
+      setFilePreview(null);
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRemoveFile = () => {
+    if (filePreview) URL.revokeObjectURL(filePreview);
+    setSelectedFile(null);
+    setFilePreview(null);
+    setFileError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const handleChange = (e) => {
     setText(e.target.value);
     if (e.target.value) onTyping?.(); // tell the parent "the user is typing"
@@ -48,13 +93,17 @@ export function MessageInput({ onSend, onTyping }) {
 
   const send = async () => {
     const trimmed = text.trim();
-    if (!trimmed || isSending) return;
+    if ((!trimmed && !selectedFile) || isSending) return;
 
     setIsSending(true);
+    setFileError("");
     try {
       // onSend returns false when the message wasn't sent: keep what was typed.
-      const sent = await onSend(trimmed);
-      if (sent !== false) setText("");
+      const sent = await onSend(trimmed, selectedFile);
+      if (sent !== false) {
+        setText("");
+        handleRemoveFile();
+      }
     } finally {
       setIsSending(false);
       textareaRef.current?.focus(); // keep typing without clicking again
@@ -75,21 +124,86 @@ export function MessageInput({ onSend, onTyping }) {
     send();
   };
 
-  const canSend = text.trim().length > 0 && !isSending;
+  const canSend = (text.trim().length > 0 || selectedFile !== null) && !isSending;
 
   return (
     <form
       onSubmit={handleSubmit}
       className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
+      {/* File error message */}
+      {fileError && (
+        <div className="mb-2 text-xs text-destructive">{fileError}</div>
+      )}
+
+      {/* Selected file preview card */}
+      {selectedFile && (
+        <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
+          <div className="flex items-center gap-3 overflow-hidden">
+            {filePreview ? (
+              <img
+                src={filePreview}
+                alt="Upload preview"
+                className="h-12 w-12 shrink-0 rounded-lg object-cover"
+              />
+            ) : (
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <File className="h-6 w-6" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-foreground">
+                {selectedFile.name}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {formatFileSize(selectedFile.size)}
+                {isEncrypted ? " • 🔒 Encrypted before upload" : ""}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRemoveFile}
+            aria-label="Remove attachment"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
+        {/* Hidden File Input */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileSelect}
+          className="hidden"
+          accept="image/*,.pdf,.doc,.docx,.txt,.zip,.tar,.gz,.json"
+        />
+
+        {/* Attachment Button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isSending}
+          aria-label="Attach file"
+          title="Attach file or photo"
+          className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+        >
+          <Paperclip className="h-4 w-4" />
+        </button>
+
         <textarea
           ref={textareaRef}
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           rows={1}
-          placeholder="Type a message…"
+          placeholder={
+            selectedFile ? "Add a caption… (optional)" : "Type a message…"
+          }
           aria-label="Message"
           autoComplete="off"
           className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"

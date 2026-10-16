@@ -29,6 +29,8 @@ import {
   decryptMessages,
   decryptReactions,
 } from "@/lib/e2ee/messages";
+import { encryptMedia } from "@/lib/e2ee/media";
+import { uploadMediaRequest } from "@/api/mediaApi";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence
 const TYPING_REFRESH_MS = 2500; // while I keep typing, re-announce this often
@@ -472,31 +474,79 @@ export function ChatWindow({
   };
 
   // Returns false when the message wasn't sent, so the input keeps the text.
-  const handleSend = async (text) => {
+  const handleSend = async (text, file) => {
     if (!socket) return false;
     stopTyping();
     setSendError("");
 
-    const attempt = async () => {
-      const payload = await buildOutgoingMessage({ room, currentUser, text });
-
-      return new Promise((resolve) => {
-        socket
-          .timeout(10000)
-          .emit(
-            "message:send",
-            { roomId: room.id, ...payload },
-            (err, response) =>
-              resolve(
-                err
-                  ? { success: false, message: "No response from the server." }
-                  : response,
-              ),
-          );
-      });
-    };
-
     try {
+      let mediaPayload = null;
+
+      if (file) {
+        const isEncrypted = encryption === "active" || room.encrypted;
+
+        if (isEncrypted) {
+          // 1. Encrypt file client-side using AES-GCM
+          const encrypted = await encryptMedia(file);
+
+          // 2. Upload the encrypted binary blob to storage
+          const uploadRes = await uploadMediaRequest(encrypted.encryptedBlob, {
+            encrypted: true,
+            fileName: `${file.name}.enc`,
+          });
+
+          // 3. Media payload to be packed INSIDE the E2EE envelope
+          mediaPayload = {
+            url: uploadRes.data.url,
+            publicId: uploadRes.data.publicId,
+            key: encrypted.mediaKey,
+            iv: encrypted.mediaIv,
+            fileName: encrypted.fileName,
+            fileType: encrypted.fileType,
+            fileSize: encrypted.fileSize,
+          };
+        } else {
+          // 1. Upload unencrypted file directly to storage
+          const uploadRes = await uploadMediaRequest(file, {
+            encrypted: false,
+            fileName: file.name,
+          });
+
+          // 2. Normal unencrypted media payload
+          mediaPayload = {
+            url: uploadRes.data.url,
+            publicId: uploadRes.data.publicId,
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            fileSize: file.size,
+          };
+        }
+      }
+
+      const attempt = async () => {
+        const payload = await buildOutgoingMessage({
+          room,
+          currentUser,
+          text,
+          media: mediaPayload,
+        });
+
+        return new Promise((resolve) => {
+          socket
+            .timeout(15000)
+            .emit(
+              "message:send",
+              { roomId: room.id, ...payload },
+              (err, response) =>
+                resolve(
+                  err
+                    ? { success: false, message: "No response from the server." }
+                    : response,
+                ),
+            );
+        });
+      };
+
       let ack = await attempt();
 
       // Someone joined while this was being encrypted: re-read the member
@@ -754,7 +804,11 @@ export function ChatWindow({
         </p>
       )}
 
-      <MessageInput onSend={handleSend} onTyping={handleTyping} />
+      <MessageInput
+        onSend={handleSend}
+        onTyping={handleTyping}
+        isEncrypted={encryption === "active" || room.encrypted}
+      />
       <SafetyNumberDialog
         open={Boolean(verifyUserId)}
         onOpenChange={(isOpen) => {

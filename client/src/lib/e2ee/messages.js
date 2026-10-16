@@ -12,14 +12,16 @@ export const MAX_TEXT_LENGTH = 4000;
 export const ENCRYPTED_PREVIEW = "🔒 Encrypted message";
 
 // Decides how to send: -> { e2ee } for an encrypted message, or { text } for a
+// Decides how to send: -> { e2ee } for an encrypted message, or { text } for a
 // chat that can't be encrypted yet. Throws with a readable message.
 export async function buildOutgoingMessage({
   room,
   currentUser,
-  text,
+  text = "",
+  media = null,
   secret,
 }) {
-  if (text.length > MAX_TEXT_LENGTH) {
+  if (text && text.length > MAX_TEXT_LENGTH) {
     throw new Error(`Messages can be up to ${MAX_TEXT_LENGTH} characters.`);
   }
 
@@ -35,7 +37,9 @@ export async function buildOutgoingMessage({
   const mustEncrypt = info.encrypted || room.encrypted;
 
   // Not everyone can read encrypted messages yet and the chat isn't locked in.
-  if (!hasAllKeys(info) && !mustEncrypt) return { text };
+  if (!hasAllKeys(info) && !mustEncrypt) {
+    return { text: text || "", ...(media && { media }) };
+  }
 
   // A private chat with a device-less person has nobody who could read it.
   if (room.type === "private" && !hasAllKeys(info)) {
@@ -46,7 +50,11 @@ export async function buildOutgoingMessage({
 
   const envelope = await encryptEnvelope({
     roomId: room.id,
-    payload: { text, secret: secret ?? generateMessageSecret() },
+    payload: {
+      text: text || "",
+      ...(media && { media }),
+      secret: secret ?? generateMessageSecret(),
+    },
     sender: {
       userId: currentUser.id,
       deviceId: identity.deviceId,
@@ -60,7 +68,7 @@ export async function buildOutgoingMessage({
 }
 
 // Plaintext and system messages come back unchanged. Encrypted ones come back
-// with `text` filled in, `secret` (used for reactions), their reactions
+// with `text` filled in, `media` (if attached), `secret` (used for reactions), their reactions
 // decrypted, and `decrypt`: "ok" | "failed" | "other-device" | "not-recipient".
 export async function decryptMessage(message, { roomId, userId }) {
   if (!message.encrypted || !message.e2ee) return message;
@@ -79,7 +87,8 @@ export async function decryptMessage(message, { roomId, userId }) {
 
     return {
       ...message,
-      text: payload.text,
+      text: payload.text || "",
+      media: payload.media || null,
       secret,
       reactions: await decryptReactions(message.reactions, {
         secret,
@@ -97,6 +106,7 @@ export async function decryptMessage(message, { roomId, userId }) {
     return {
       ...message,
       text: "",
+      media: null,
       secret: null,
       // Sealed reactions can't be opened without the message; plain ones can.
       reactions: (message.reactions ?? []).filter((r) => !r.ciphertext),
@@ -120,7 +130,12 @@ export async function decryptPreview(lastMessage, { roomId, userId }) {
       me: identity,
     });
 
-    return payload.text;
+    if (payload.text) return payload.text;
+    if (payload.media) {
+      if (payload.media.fileType?.startsWith("image/")) return "📷 Photo";
+      return `📎 ${payload.media.fileName || "Attachment"}`;
+    }
+    return ENCRYPTED_PREVIEW;
   } catch (err) {
     console.error("[e2ee] couldn't decrypt a sidebar preview:", err);
     return ENCRYPTED_PREVIEW;

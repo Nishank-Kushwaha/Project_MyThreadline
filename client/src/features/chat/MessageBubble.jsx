@@ -15,6 +15,7 @@ import { QuickReactBar } from "./QuickReactBar";
 import { ReactionPills } from "./ReactionPills";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { MediaAttachment } from "./MediaAttachment";
 
 // Code-split: emoji-picker-react's emoji dataset only downloads when
 // someone actually opens the picker.
@@ -373,7 +374,7 @@ export function MessageBubble({
                         }}
                         className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
                       >
-                        {editable && (
+                        {editable && !message.media && (
                           <button
                             type="button"
                             role="menuitem"
@@ -456,9 +457,16 @@ export function MessageBubble({
                         : "Couldn't decrypt this message"}
                   </p>
                 ) : (
-                  <p className="whitespace-pre-wrap wrap-break-word text-sm">
-                    {message.text}
-                  </p>
+                  <>
+                    {message.media && (
+                      <MediaAttachment media={message.media} isOwn={isOwn} />
+                    )}
+                    {message.text && (
+                      <p className="whitespace-pre-wrap wrap-break-word text-sm">
+                        {message.text}
+                      </p>
+                    )}
+                  </>
                 )}
                 <div className="mt-1 flex items-center justify-end gap-1 text-[10px]">
                   {message.encrypted && (
