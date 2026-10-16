@@ -56,7 +56,7 @@ export async function encryptMedia(file) {
  * Downloads an encrypted media file and decrypts it with AES-GCM.
  * Resolves to a browser object URL (blob:...) that can be passed to <img src> or <a> download.
  */
-export async function decryptMedia({ url, key, iv, fileType }) {
+export async function decryptMedia({ url, key, iv, fileType, fileName }) {
   if (!url) throw new Error("No URL provided for media decryption");
   if (!key || !iv) throw new Error("Decryption key or IV missing for media");
 
@@ -91,8 +91,22 @@ export async function decryptMedia({ url, key, iv, fileType }) {
       encryptedBuffer,
     );
 
+    let mime = fileType;
+    const lowerName = (fileName || "").toLowerCase();
+    if (!mime || mime === "application/octet-stream") {
+      if (lowerName.endsWith(".pdf")) mime = "application/pdf";
+      else if (lowerName.endsWith(".png")) mime = "image/png";
+      else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg"))
+        mime = "image/jpeg";
+      else if (lowerName.endsWith(".webp")) mime = "image/webp";
+      else if (lowerName.endsWith(".gif")) mime = "image/gif";
+      else if (lowerName.endsWith(".txt")) mime = "text/plain";
+      else if (lowerName.endsWith(".json")) mime = "application/json";
+      else mime = "application/octet-stream";
+    }
+
     const blob = new Blob([decryptedBuffer], {
-      type: fileType || "application/octet-stream",
+      type: mime,
     });
 
     const objectUrl = URL.createObjectURL(blob);
