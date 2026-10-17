@@ -55,6 +55,9 @@ export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose })
   const lastScrollTop      = useRef(0);
   const pageChangeDebounce = useRef(null);
   const touchStartX        = useRef(0);
+  const touchStartY        = useRef(0);
+  // Cooldown flag: prevents multiple rapid page-turns from one gesture
+  const pageTurnCooldown   = useRef(false);
 
   // ── Close on Escape ────────────────────────────────────────────────────
   useEffect(() => {
@@ -144,14 +147,15 @@ export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose })
     return () => { window.removeEventListener("resize", onResize); clearTimeout(timer); };
   }, [renderPage]);
 
-  // ── Scroll → auto page-turn ────────────────────────────────────────────
+  // ── Scroll → auto page-turn (desktop trackpad/wheel + mobile smooth scroll) ──
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (!el || scrollingToPage.current) return;
+    if (!el || scrollingToPage.current || pageTurnCooldown.current) return;
 
     const { scrollTop, scrollHeight, clientHeight } = el;
-    const atBottom  = scrollTop + clientHeight >= scrollHeight - 8;
-    const atTop     = scrollTop <= 2;
+    // Generous threshold so touch inertia or trackpad easily reaches boundary
+    const atBottom  = scrollTop + clientHeight >= scrollHeight - 20;
+    const atTop     = scrollTop <= 8;
     const goingDown = scrollTop > lastScrollTop.current;
     lastScrollTop.current = scrollTop;
 
@@ -161,9 +165,11 @@ export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose })
         setCurrentPage((p) => {
           if (p >= numPages) return p;
           scrollingToPage.current = true;
+          pageTurnCooldown.current = true;
           requestAnimationFrame(() => {
             if (scrollRef.current) scrollRef.current.scrollTop = 0;
             scrollingToPage.current = false;
+            setTimeout(() => { pageTurnCooldown.current = false; }, 350);
           });
           return p + 1;
         });
@@ -171,14 +177,16 @@ export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose })
         setCurrentPage((p) => {
           if (p <= 1) return p;
           scrollingToPage.current = true;
+          pageTurnCooldown.current = true;
           requestAnimationFrame(() => {
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
             scrollingToPage.current = false;
+            setTimeout(() => { pageTurnCooldown.current = false; }, 350);
           });
           return p - 1;
         });
       }
-    }, 80);
+    }, 70);
   }, [numPages]);
 
   // ── Navigation ─────────────────────────────────────────────────────────
@@ -196,10 +204,48 @@ export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose })
   const zoomIn   = () => setScale((s) => Math.min(+(s + 0.25).toFixed(2), 3.0));
   const zoomOut  = () => setScale((s) => Math.max(+(s - 0.25).toFixed(2), 0.5));
 
-  const onTouchStart = (e) => { touchStartX.current = e.changedTouches[0].screenX; };
-  const onTouchEnd   = (e) => {
-    const diff = touchStartX.current - e.changedTouches[0].screenX;
-    if (Math.abs(diff) > 50) diff > 0 ? goToNext() : goToPrev();
+  // ── Mobile / Tablet Touch Gestures ──────────────────────────────────────
+  const onTouchStart = (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const onTouchEnd = (e) => {
+    if (!e.changedTouches || e.changedTouches.length !== 1 || pageTurnCooldown.current) return;
+    const diffX = touchStartX.current - e.changedTouches[0].clientX;
+    const diffY = touchStartY.current - e.changedTouches[0].clientY;
+
+    const el = scrollRef.current;
+    const isScrollable = el ? el.scrollHeight > el.clientHeight + 10 : false;
+
+    // 1. Horizontal swipe: always triggers prev / next page
+    if (Math.abs(diffX) > 60 && Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+      if (diffX > 0) goToNext(); // swipe left -> next page
+      else goToPrev();          // swipe right -> previous page
+      return;
+    }
+
+    // 2. Vertical swipe on mobile / tablet:
+    // If content does not scroll (fits the screen) OR if user is already at top/bottom boundary
+    if (Math.abs(diffY) > 50 && Math.abs(diffY) > Math.abs(diffX)) {
+      if (!isScrollable) {
+        // Content fits screen: swipe up -> next page, swipe down -> prev page
+        if (diffY > 0) goToNext();
+        else goToPrev();
+      } else if (el) {
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 25;
+        const atTop = el.scrollTop <= 15;
+
+        if (diffY > 0 && atBottom) {
+          // Swiped up while already at the bottom
+          goToNext();
+        } else if (diffY < 0 && atTop) {
+          // Swiped down while already at the top
+          goToPrev();
+        }
+      }
+    }
   };
 
   // ── Shared button style for control pill items ─────────────────────────
