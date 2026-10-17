@@ -95,28 +95,28 @@ export function MediaAttachment({ media, isOwn }) {
     return () => { cancelled = true; };
   }, [media?.url, media?.key, media?.iv, media?.fileType, media?.fileName, isEncrypted]);
 
-  // ── Close on Escape ────────────────────────────────────────────────────
+  // ── Escape to close non-PDF modals ────────────────────────────────────
   useEffect(() => {
-    if (!isModalOpen) return;
+    if (!isModalOpen || isPdf) return; // PdfViewer handles its own escape
     const onKey = (e) => { if (e.key === "Escape") setIsModalOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isModalOpen]);
+  }, [isModalOpen, isPdf]);
 
   if (!media?.url) return null;
 
   const FileIcon = getFileIcon(media.fileType, media.fileName);
 
-  // ── Full-screen viewer modal (portal) ──────────────────────────────────
-  const renderModal = () => {
-    if (!isModalOpen || !blobUrl) return null;
+  // ── Non-PDF full-screen modal (images, text, generic) ─────────────────
+  const renderGenericModal = () => {
+    if (!isModalOpen || !blobUrl || isPdf) return null;
 
     return createPortal(
       <div
         className="fixed inset-0 z-50 flex flex-col bg-black/95 text-white"
         onClick={() => setIsModalOpen(false)}
       >
-        {/* ── Top header bar ── */}
+        {/* Top header */}
         <header
           className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-neutral-900/95 px-4"
           onClick={(e) => e.stopPropagation()}
@@ -131,13 +131,11 @@ export function MediaAttachment({ media, isOwn }) {
               </h2>
               <p className="text-[11px] text-white/50 leading-tight">
                 {formatFileSize(media.fileSize)}
-                {isEncrypted ? " • 🔒 E2E encrypted" : ""}
+                {isEncrypted ? " · 🔒 E2E encrypted" : ""}
               </p>
             </div>
           </div>
-
           <div className="flex shrink-0 items-center gap-1 pl-3">
-            {/* Save as (download) */}
             <a
               href={blobUrl}
               download={media.fileName || "download"}
@@ -146,8 +144,6 @@ export function MediaAttachment({ media, isOwn }) {
             >
               <Download className="h-4 w-4" />
             </a>
-
-            {/* Close */}
             <button
               type="button"
               onClick={() => setIsModalOpen(false)}
@@ -159,24 +155,12 @@ export function MediaAttachment({ media, isOwn }) {
           </div>
         </header>
 
-        {/* ── Viewer body ── */}
+        {/* Viewer body */}
         <div
           className="flex flex-1 overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
-          {isPdf ? (
-            /* PDF.js canvas viewer — works on all devices including Android Chrome */
-            <Suspense
-              fallback={
-                <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-white/60">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  <p className="text-sm">Loading PDF reader…</p>
-                </div>
-              }
-            >
-              <PdfViewer blobUrl={blobUrl} fileName={media.fileName} />
-            </Suspense>
-          ) : isImage ? (
+          {isImage ? (
             <div className="flex flex-1 items-center justify-center overflow-auto p-4">
               <img
                 src={blobUrl}
@@ -261,7 +245,7 @@ export function MediaAttachment({ media, isOwn }) {
                   <Download className="h-3.5 w-3.5" />
                 </a>
               </div>
-              {renderModal()}
+              {renderGenericModal()}
             </>
           )
         )}
@@ -271,6 +255,7 @@ export function MediaAttachment({ media, isOwn }) {
 
   // ══════════════════════════════════════════════════════════════════════════
   // PDF ATTACHMENT — WhatsApp-style bubble card
+  // PdfViewer owns its own full-screen modal (no wrapper needed here)
   // ══════════════════════════════════════════════════════════════════════════
   if (isPdf) {
     return (
@@ -283,9 +268,8 @@ export function MediaAttachment({ media, isOwn }) {
               : "border-border bg-background/60",
           )}
         >
-          {/* ── PDF card top row: icon + name + size ── */}
+          {/* PDF card top row: icon + name + size */}
           <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-            {/* Red PDF icon — matches WhatsApp */}
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-500 text-white shadow-sm">
               {isLoading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
@@ -293,7 +277,6 @@ export function MediaAttachment({ media, isOwn }) {
                 <FileText className="h-5 w-5" />
               )}
             </div>
-
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-foreground leading-snug">
                 {media.fileName || "Document.pdf"}
@@ -305,7 +288,7 @@ export function MediaAttachment({ media, isOwn }) {
             </div>
           </div>
 
-          {/* ── Error state ── */}
+          {/* Error */}
           {error && (
             <div className="flex items-center gap-1.5 px-3 pb-2 text-xs text-destructive">
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -313,37 +296,30 @@ export function MediaAttachment({ media, isOwn }) {
             </div>
           )}
 
-          {/* ── Action buttons: View | Save as… ── */}
+          {/* Action buttons: View | Save as… */}
           <div
             className={cn(
               "flex border-t",
-              isOwn
-                ? "border-black/10 dark:border-white/10"
-                : "border-border",
+              isOwn ? "border-black/10 dark:border-white/10" : "border-border",
             )}
           >
-            {/* View button — opens full-screen PDF.js viewer */}
+            {/* View */}
             <button
               type="button"
               onClick={() => { if (blobUrl && !isLoading) setIsModalOpen(true); }}
               disabled={isLoading || !blobUrl}
               className={cn(
-                "flex flex-1 items-center justify-center py-2 text-sm font-semibold transition",
-                "border-r",
+                "flex flex-1 items-center justify-center py-2 text-sm font-semibold transition border-r",
                 isOwn
                   ? "border-black/10 text-foreground hover:bg-black/10 dark:border-white/10 dark:text-white dark:hover:bg-white/10"
                   : "border-border text-primary hover:bg-primary/8",
                 (isLoading || !blobUrl) && "cursor-not-allowed opacity-50",
               )}
             >
-              {isLoading ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                "View"
-              )}
+              {isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "View"}
             </button>
 
-            {/* Save as… button — direct download */}
+            {/* Save as… */}
             {blobUrl && !isLoading ? (
               <a
                 href={blobUrl}
@@ -358,16 +334,27 @@ export function MediaAttachment({ media, isOwn }) {
                 Save as…
               </a>
             ) : (
-              <span
-                className="flex flex-1 items-center justify-center py-2 text-sm font-semibold opacity-40 cursor-not-allowed"
-              >
+              <span className="flex flex-1 items-center justify-center py-2 text-sm font-semibold opacity-40 cursor-not-allowed">
                 Save as…
               </span>
             )}
           </div>
         </div>
 
-        {renderModal()}
+        {/* PdfViewer owns its entire full-screen modal */}
+        {isModalOpen && blobUrl && (
+          <Suspense
+            fallback={null /* modal not shown until chunk loads */}
+          >
+            <PdfViewer
+              blobUrl={blobUrl}
+              fileName={media.fileName}
+              fileSize={media.fileSize}
+              isEncrypted={isEncrypted}
+              onClose={() => setIsModalOpen(false)}
+            />
+          </Suspense>
+        )}
       </>
     );
   }
@@ -396,13 +383,8 @@ export function MediaAttachment({ media, isOwn }) {
         )}
       >
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-transform group-hover/doc:scale-105">
-          {isLoading ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : (
-            <FileIcon className="h-5 w-5" />
-          )}
+          {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileIcon className="h-5 w-5" />}
         </div>
-
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-foreground transition-colors group-hover/doc:text-primary">
             {media.fileName || "Attachment"}
@@ -412,7 +394,6 @@ export function MediaAttachment({ media, isOwn }) {
             {isEncrypted ? " · E2E encrypted" : ""}
           </p>
         </div>
-
         {blobUrl && !isLoading && (
           <a
             href={blobUrl}
@@ -426,7 +407,7 @@ export function MediaAttachment({ media, isOwn }) {
         )}
       </div>
 
-      {renderModal()}
+      {renderGenericModal()}
     </>
   );
 }

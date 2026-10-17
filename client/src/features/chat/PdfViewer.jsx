@@ -1,44 +1,69 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { ChevronUp, ChevronDown, ZoomIn, ZoomOut, Loader2, AlertCircle, Download } from "lucide-react";
+import {
+  ChevronUp,
+  ChevronDown,
+  ZoomIn,
+  ZoomOut,
+  FileText,
+  Download,
+  ExternalLink,
+  X,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
+import { formatFileSize } from "@/lib/e2ee/media";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 /**
- * WhatsApp Desktop-style PDF Viewer
+ * Full-screen PDF Viewer — WhatsApp-inspired layout
  *
- * Layout:
- * ┌─────────────────────────────────┬───────┐
- * │                                 │  [ 1] │ ← current page number
- * │      PDF PAGE (canvas)          │ [31 ] │ ← total pages
- * │      full width of left area    │  [↑]  │
- * │      scrollable vertically      │  [↓]  │
- * │                                 │  [⊕]  │ ← zoom in
- * │                                 │  [⊖]  │ ← zoom out
- * └─────────────────────────────────┴───────┘
- *
- * Props:
- *   blobUrl   – object URL of the decrypted PDF blob
- *   fileName  – display name shown in the parent header
+ * ┌─────────────────────────────────────────────────────────────────────┐
+ * │  ┌──────────────────────┐          ┌─────────────────────────────┐  │
+ * │  │ [icon]  filename      │          │ [new-tab] [download] [close]│  │
+ * │  │         size · lock  │          └─────────────────────────────┘  │
+ * │  └──────────────────────┘                                           │
+ * ├─────────────────────────────────────────────────────────────────────┤
+ * │  (dark bg)                                                          │
+ * │        ┌──────────────────────────────────────┐                     │
+ * │        │  1  │  31  │  ↑  │  ↓  │  ⊕  │  ⊖  │  ← control pill    │
+ * │        └──────────────────────────────────────┘                     │
+ * │   ┌───────────────────────────────────────────────────────────┐     │
+ * │   │                                                           │░░   │
+ * │   │                  PDF  page  (canvas)                      │░░   │
+ * │   │                                                           │░░   │
+ * │   └───────────────────────────────────────────────────────────┘     │
+ * └─────────────────────────────────────────────────────────────────────┘
  */
-export function PdfViewer({ blobUrl, fileName }) {
-  const containerRef = useRef(null); // left scrollable area
-  const canvasRef = useRef(null);
+export function PdfViewer({ blobUrl, fileName, fileSize, isEncrypted, onClose }) {
+  const scrollRef     = useRef(null);
+  const canvasRef     = useRef(null);
   const renderTaskRef = useRef(null);
 
-  const [pdfDoc, setPdfDoc] = useState(null);
-  const [numPages, setNumPages] = useState(0);
+  const [pdfDoc,      setPdfDoc]      = useState(null);
+  const [numPages,    setNumPages]    = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [scale, setScale] = useState(1.0);
-  const [loading, setLoading] = useState(true);
-  const [rendering, setRendering] = useState(false);
-  const [error, setError] = useState(null);
+  const [scale,       setScale]       = useState(1.0);
+  const [loading,     setLoading]     = useState(true);
+  const [rendering,   setRendering]   = useState(false);
+  const [error,       setError]       = useState(null);
 
-  // Touch swipe for mobile
-  const touchStartX = useRef(0);
+  const scrollingToPage    = useRef(false);
+  const lastScrollTop      = useRef(0);
+  const pageChangeDebounce = useRef(null);
+  const touchStartX        = useRef(0);
 
-  // ── Load PDF ──────────────────────────────────────────────────────────────
+  // ── Close on Escape ────────────────────────────────────────────────────
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // ── Load PDF ───────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -63,55 +88,48 @@ export function PdfViewer({ blobUrl, fileName }) {
       .catch((err) => {
         if (!cancelled) {
           console.error("PDF.js load error:", err);
-          setError("Failed to load PDF. Please download the file to view it.");
+          setError("Failed to load PDF. Please download to view.");
           setLoading(false);
         }
       });
 
-    return () => {
-      cancelled = true;
-      loadingTask.destroy?.();
-    };
+    return () => { cancelled = true; loadingTask.destroy?.(); };
   }, [blobUrl]);
 
-  // ── Render page ───────────────────────────────────────────────────────────
+  // ── Render page ────────────────────────────────────────────────────────
   const renderPage = useCallback(async () => {
-    if (!pdfDoc || !canvasRef.current || !containerRef.current) return;
+    if (!pdfDoc || !canvasRef.current || !scrollRef.current) return;
 
-    // Cancel any in-flight render
-    try {
-      renderTaskRef.current?.cancel();
-    } catch (_) { /* ignore */ }
-
+    try { renderTaskRef.current?.cancel(); } catch (_) { /* ignore */ }
     setRendering(true);
 
     try {
-      const page = await pdfDoc.getPage(currentPage);
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext("2d");
+      const pdfPage = await pdfDoc.getPage(currentPage);
+      const canvas  = canvasRef.current;
+      const ctx     = canvas.getContext("2d");
 
-      // Fit page to the left-panel width (subtract a little padding)
-      const containerWidth = Math.max(containerRef.current.clientWidth - 24, 200);
-      const baseViewport = page.getViewport({ scale: 1 });
-      const fitScale = (containerWidth / baseViewport.width) * scale;
-      const viewport = page.getViewport({ scale: fitScale });
+      const containerWidth = scrollRef.current.clientWidth;
+      const isNarrow       = containerWidth < 640;
+      // Padding subtracted from available width (matches the CSS padding on the wrapper)
+      const padding        = isNarrow ? 24 : 48;
+      const availableWidth = Math.max(containerWidth - padding * 2, 160);
+
+      const baseViewport = pdfPage.getViewport({ scale: 1 });
+      const fitScale     = (availableWidth / baseViewport.width) * scale;
+      const viewport     = pdfPage.getViewport({ scale: fitScale });
 
       const dpr = window.devicePixelRatio || 1;
-
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.width        = Math.floor(viewport.width  * dpr);
+      canvas.height       = Math.floor(viewport.height * dpr);
+      canvas.style.width  = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
 
       const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
-
-      const task = page.render({ canvasContext: ctx, transform, viewport });
+      const task = pdfPage.render({ canvasContext: ctx, transform, viewport });
       renderTaskRef.current = task;
       await task.promise;
     } catch (err) {
-      if (err?.name !== "RenderingCancelledException") {
-        console.error("PDF render error:", err);
-      }
+      if (err?.name !== "RenderingCancelledException") console.error("PDF render error:", err);
     } finally {
       setRendering(false);
     }
@@ -119,7 +137,6 @@ export function PdfViewer({ blobUrl, fileName }) {
 
   useEffect(() => { renderPage(); }, [renderPage]);
 
-  // Re-render on resize (debounced)
   useEffect(() => {
     let timer;
     const onResize = () => { clearTimeout(timer); timer = setTimeout(renderPage, 180); };
@@ -127,141 +144,247 @@ export function PdfViewer({ blobUrl, fileName }) {
     return () => { window.removeEventListener("resize", onResize); clearTimeout(timer); };
   }, [renderPage]);
 
-  // ── Navigation ────────────────────────────────────────────────────────────
-  const goToPrev = () => setCurrentPage((p) => Math.max(p - 1, 1));
-  const goToNext = () => setCurrentPage((p) => Math.min(p + 1, numPages));
+  // ── Scroll → auto page-turn ────────────────────────────────────────────
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || scrollingToPage.current) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const atBottom  = scrollTop + clientHeight >= scrollHeight - 8;
+    const atTop     = scrollTop <= 2;
+    const goingDown = scrollTop > lastScrollTop.current;
+    lastScrollTop.current = scrollTop;
+
+    clearTimeout(pageChangeDebounce.current);
+    pageChangeDebounce.current = setTimeout(() => {
+      if (atBottom && goingDown) {
+        setCurrentPage((p) => {
+          if (p >= numPages) return p;
+          scrollingToPage.current = true;
+          requestAnimationFrame(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = 0;
+            scrollingToPage.current = false;
+          });
+          return p + 1;
+        });
+      } else if (atTop && !goingDown) {
+        setCurrentPage((p) => {
+          if (p <= 1) return p;
+          scrollingToPage.current = true;
+          requestAnimationFrame(() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            scrollingToPage.current = false;
+          });
+          return p - 1;
+        });
+      }
+    }, 80);
+  }, [numPages]);
+
+  // ── Navigation ─────────────────────────────────────────────────────────
+  const goToPage = useCallback((next) => {
+    setCurrentPage(next);
+    scrollingToPage.current = true;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+      scrollingToPage.current = false;
+    });
+  }, []);
+
+  const goToPrev = () => { if (currentPage > 1)       goToPage(currentPage - 1); };
+  const goToNext = () => { if (currentPage < numPages) goToPage(currentPage + 1); };
   const zoomIn   = () => setScale((s) => Math.min(+(s + 0.25).toFixed(2), 3.0));
   const zoomOut  = () => setScale((s) => Math.max(+(s - 0.25).toFixed(2), 0.5));
 
-  // Touch swipe (left = next, right = prev)
   const onTouchStart = (e) => { touchStartX.current = e.changedTouches[0].screenX; };
   const onTouchEnd   = (e) => {
     const diff = touchStartX.current - e.changedTouches[0].screenX;
     if (Math.abs(diff) > 50) diff > 0 ? goToNext() : goToPrev();
   };
 
-  // ── Loading state ─────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-white/70">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-sm font-medium">Opening PDF…</p>
-      </div>
-    );
-  }
+  // ── Shared button style for control pill items ─────────────────────────
+  const ctrlBtn =
+    "flex h-9 w-9 items-center justify-center text-white/80 transition " +
+    "hover:bg-white/10 active:bg-white/20 " +
+    "disabled:opacity-25 disabled:cursor-not-allowed";
 
-  if (error) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center">
-        <AlertCircle className="h-12 w-12 text-destructive" />
-        <p className="text-sm text-white/70">{error}</p>
-        <a
-          href={blobUrl}
-          download={fileName || "document.pdf"}
-          className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow hover:bg-primary/90 transition"
-        >
-          <Download className="h-4 w-4" />
-          Download file
-        </a>
-      </div>
-    );
-  }
+  // ── Render ─────────────────────────────────────────────────────────────
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex flex-col bg-neutral-800 text-white">
 
-  // ── Main layout ───────────────────────────────────────────────────────────
-  return (
-    <div className="flex h-full w-full overflow-hidden">
+      {/* ══ HEADER ════════════════════════════════════════════════════════ */}
+      <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-neutral-900 px-3 sm:px-5">
 
-      {/* ── Left: scrollable PDF canvas area ── */}
-      <div
-        ref={containerRef}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
-        className="relative flex-1 overflow-auto bg-[#1a1a1a]"
-        style={{ WebkitOverflowScrolling: "touch" }}
-      >
-        {/* Rendering spinner overlay */}
-        {rendering && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
-            <Loader2 className="h-6 w-6 animate-spin text-white/80" />
+        {/* Left block — icon + file info — rounded container */}
+        <div className="flex min-w-0 items-center gap-2.5 overflow-hidden rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10">
+            <FileText className="h-4 w-4 text-white/80" />
           </div>
-        )}
-
-        {/* Canvas centred inside the scroll area */}
-        <div className="flex min-h-full items-start justify-center p-3">
-          <canvas
-            ref={canvasRef}
-            className="block bg-white shadow-2xl"
-            style={{ maxWidth: "100%" }}
-          />
-        </div>
-      </div>
-
-      {/* ── Right: WhatsApp-style vertical control panel ── */}
-      <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-l border-white/10 bg-neutral-900 py-4 select-none">
-
-        {/* Current page number */}
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white">
-          {currentPage}
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-white leading-tight max-w-[140px] sm:max-w-xs md:max-w-md">
+              {fileName || "Document.pdf"}
+            </p>
+            <p className="truncate text-[11px] text-white/50 leading-tight">
+              {fileSize ? formatFileSize(fileSize) : ""}
+              {isEncrypted ? " · 🔒 E2E encrypted" : ""}
+            </p>
+          </div>
         </div>
 
-        {/* Total pages */}
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg text-sm font-medium text-white/50">
-          {numPages}
+        {/* Right block — new tab + download + close — rounded container */}
+        <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 p-1.5">
+          {/* Open in new tab */}
+          <a
+            href={blobUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open in new tab"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <ExternalLink className="h-4 w-4" />
+          </a>
+
+          {/* Download */}
+          <a
+            href={blobUrl}
+            download={fileName || "document.pdf"}
+            title="Save as…"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <Download className="h-4 w-4" />
+          </a>
+
+          {/* Close */}
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close (Esc)"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
+      </header>
 
-        {/* Up arrow (previous page) */}
-        <button
-          type="button"
-          onClick={goToPrev}
-          disabled={currentPage <= 1 || rendering}
-          aria-label="Previous page"
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 active:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          <ChevronUp className="h-5 w-5" />
-        </button>
+      {/* ══ CONTENT AREA ═════════════════════════════════════════════════ */}
+      {loading ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-white/70">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm font-medium">Opening PDF…</p>
+        </div>
+      ) : error ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+          <AlertCircle className="h-12 w-12 text-destructive" />
+          <p className="text-sm text-white/70">{error}</p>
+          <a
+            href={blobUrl}
+            download={fileName || "document.pdf"}
+            className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow hover:bg-primary/90 transition"
+          >
+            <Download className="h-4 w-4" />
+            Download file
+          </a>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col overflow-hidden">
 
-        {/* Down arrow (next page) */}
-        <button
-          type="button"
-          onClick={goToNext}
-          disabled={currentPage >= numPages || rendering}
-          aria-label="Next page"
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 active:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          <ChevronDown className="h-5 w-5" />
-        </button>
+          {/* ── Control panel pill — centered below header ── */}
+          <div className="flex shrink-0 items-center justify-center px-4 pt-3 pb-2">
+            <div className="flex items-center overflow-hidden rounded-full border border-white/10 bg-neutral-900/90 shadow-lg select-none">
 
-        {/* Spacer */}
-        <div className="flex-1" />
+              {/* Current page */}
+              <div className="flex h-9 min-w-[2.5rem] items-center justify-center border-r border-white/10 px-3 text-sm font-bold text-white">
+                {currentPage}
+              </div>
 
-        {/* Zoom in */}
-        <button
-          type="button"
-          onClick={zoomIn}
-          disabled={scale >= 3.0 || rendering}
-          title={`Zoom in (${Math.round(scale * 100)}%)`}
-          aria-label="Zoom in"
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 active:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          <ZoomIn className="h-4 w-4" />
-        </button>
+              {/* Total pages */}
+              <div className="flex h-9 min-w-[2.5rem] items-center justify-center border-r border-white/10 px-3 text-sm font-medium text-white/40">
+                {numPages}
+              </div>
 
-        {/* Zoom out */}
-        <button
-          type="button"
-          onClick={zoomOut}
-          disabled={scale <= 0.5 || rendering}
-          title={`Zoom out (${Math.round(scale * 100)}%)`}
-          aria-label="Zoom out"
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-white/80 transition hover:bg-white/10 active:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          <ZoomOut className="h-4 w-4" />
-        </button>
+              {/* Prev */}
+              <button
+                type="button"
+                onClick={goToPrev}
+                disabled={currentPage <= 1 || rendering}
+                aria-label="Previous page"
+                className={`${ctrlBtn} border-r border-white/10`}
+              >
+                <ChevronUp className="h-4 w-4" />
+              </button>
 
-      </div>
-    </div>
+              {/* Next */}
+              <button
+                type="button"
+                onClick={goToNext}
+                disabled={currentPage >= numPages || rendering}
+                aria-label="Next page"
+                className={`${ctrlBtn} border-r border-white/10`}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+
+              {/* Zoom in */}
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={scale >= 3.0 || rendering}
+                title={`Zoom in (${Math.round(scale * 100)}%)`}
+                aria-label="Zoom in"
+                className={`${ctrlBtn} border-r border-white/10`}
+              >
+                <ZoomIn className="h-4 w-4" />
+              </button>
+
+              {/* Zoom out */}
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={scale <= 0.5 || rendering}
+                title={`Zoom out (${Math.round(scale * 100)}%)`}
+                aria-label="Zoom out"
+                className={ctrlBtn}
+              >
+                <ZoomOut className="h-4 w-4" />
+              </button>
+
+            </div>
+          </div>
+
+          {/* ── Scrollable PDF canvas with padding ── */}
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+            className="relative flex-1 overflow-auto"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+            {/* Rendering spinner overlay */}
+            {rendering && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/25 backdrop-blur-[1px]">
+                <Loader2 className="h-6 w-6 animate-spin text-white/80" />
+              </div>
+            )}
+
+            {/*
+              Padding:  mobile → px-6 py-4   desktop → px-12 py-8
+              Canvas is centred and has a white background + shadow
+            */}
+            <div className="flex min-h-full items-start justify-center px-6 py-4 sm:px-12 sm:py-8">
+              <canvas
+                ref={canvasRef}
+                className="block rounded-sm bg-white shadow-2xl"
+                style={{ maxWidth: "100%", display: "block" }}
+              />
+            </div>
+          </div>
+
+        </div>
+      )}
+
+    </div>,
+    document.body,
   );
 }
