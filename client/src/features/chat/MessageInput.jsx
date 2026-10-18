@@ -6,10 +6,104 @@ import React, {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { Loader2, Paperclip, Send, X, File, Image as ImageIcon } from "lucide-react";
+import {
+  Loader2,
+  Paperclip,
+  Send,
+  X,
+  File,
+  Image as ImageIcon,
+} from "lucide-react";
 import { formatFileSize } from "@/lib/e2ee/media";
 
-const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB
+// 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+
+// Extensions offered in the file picker. `accept` is only a hint to the browser
+// (users can switch the dialog to "All files"), so handleFileSelect re-checks
+// against the same list. This is UX only: the backend must enforce its own
+// allowlist and validate file content.
+const ACCEPTED_EXTENSIONS = [
+  // Documents
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+  // Text and data
+  ".txt",
+  ".csv",
+  ".json",
+  ".md",
+  ".log",
+  ".xml",
+  ".yaml",
+  ".yml",
+  // Source code
+  ".js",
+  ".jsx",
+  ".ts",
+  ".tsx",
+  ".html",
+  ".css",
+  ".py",
+  ".cpp",
+  ".c",
+  ".h",
+  ".java",
+  ".sql",
+  // Archives
+  ".zip",
+  ".rar",
+  ".7z",
+  ".tar",
+  ".gz",
+];
+const ACCEPTED_MIME_PREFIXES = ["image/", "audio/", "video/"];
+// Used only for validation: some OSes report an empty MIME type for these.
+const MEDIA_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".svg",
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".oga",
+  ".m4a",
+  ".aac",
+  ".flac",
+  ".opus",
+  ".weba",
+  ".mp4",
+  ".m4v",
+  ".webm",
+  ".mov",
+  ".mkv",
+  ".avi",
+  ".ogv",
+];
+const ALLOWED_EXTENSIONS = new Set([
+  ...ACCEPTED_EXTENSIONS,
+  ...MEDIA_EXTENSIONS,
+]);
+const ACCEPT_ATTRIBUTE = [
+  ...ACCEPTED_MIME_PREFIXES.map((p) => `${p}*`),
+  ...ACCEPTED_EXTENSIONS,
+].join(",");
+
+function isAllowedFile(file) {
+  const type = (file.type || "").toLowerCase();
+  if (ACCEPTED_MIME_PREFIXES.some((prefix) => type.startsWith(prefix)))
+    return true;
+  const dot = file.name.lastIndexOf(".");
+  return dot > 0 && ALLOWED_EXTENSIONS.has(file.name.slice(dot).toLowerCase());
+}
 
 export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
   const [text, setText] = useState("");
@@ -60,11 +154,16 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setFileError("File exceeds 15MB limit.");
+    // Clearing the input lets the user pick the same file again after an error.
+    const reject = (message) => {
+      setFileError(message);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
+    };
+
+    if (file.size === 0) return reject("This file is empty.");
+    if (file.size > MAX_FILE_SIZE_BYTES)
+      return reject("File exceeds the 15 MiB limit.");
+    if (!isAllowedFile(file)) return reject("This file type isn't supported.");
 
     if (filePreview) URL.revokeObjectURL(filePreview);
 
@@ -124,7 +223,8 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
     send();
   };
 
-  const canSend = (text.trim().length > 0 || selectedFile !== null) && !isSending;
+  const canSend =
+    (text.trim().length > 0 || selectedFile !== null) && !isSending;
 
   return (
     <form
@@ -180,7 +280,7 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
           ref={fileInputRef}
           onChange={handleFileSelect}
           className="hidden"
-          accept="image/*,.pdf,.doc,.docx,.txt,.zip,.tar,.gz,.json"
+          accept={ACCEPT_ATTRIBUTE}
         />
 
         {/* Attachment Button */}
