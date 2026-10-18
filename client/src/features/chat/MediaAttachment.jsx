@@ -482,7 +482,7 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
         {/* Waveform & Scrubber */}
         <div className="relative flex-1 flex flex-col justify-center min-w-0 py-1">
           {/* Visual audio waveform bars */}
-          <div className="flex items-center gap-[2.5px] sm:gap-[3px] h-7 w-full overflow-hidden px-0.5">
+          <div className="flex items-center gap-[2.5px] sm:gap-0.75 h-7 w-full overflow-hidden px-0.5">
             {barHeights.map((h, i) => {
               const barPercent = (i / (barHeights.length - 1)) * 100;
               const isPassed = barPercent <= progressPercent;
@@ -491,7 +491,7 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
                   key={i}
                   style={{ height: `${h}%` }}
                   className={cn(
-                    "flex-1 rounded-full transition-colors duration-150 min-w-[2px]",
+                    "flex-1 rounded-full transition-colors duration-150 min-w-0.5",
                     isPassed
                       ? isOwn
                         ? "bg-primary dark:bg-primary"
@@ -559,7 +559,13 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
 }
 
 // WhatsApp-style modern Video Card with overlay controls and thumbnail view
-function CustomVideoPlayer({ src, fileName, isOwn, onOpenFullscreen, onError }) {
+function CustomVideoPlayer({
+  src,
+  fileName,
+  isOwn,
+  onOpenFullscreen,
+  onError,
+}) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -659,8 +665,10 @@ function CustomVideoPlayer({ src, fileName, isOwn, onOpenFullscreen, onError }) 
       <div
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          "absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2.5 pt-6 transition-opacity duration-200",
-          showControls || !isPlaying ? "opacity-100" : "opacity-0 hover:opacity-100",
+          "absolute bottom-0 inset-x-0 bg-linear-to-t from-black/85 via-black/40 to-transparent p-2.5 pt-6 transition-opacity duration-200",
+          showControls || !isPlaying
+            ? "opacity-100"
+            : "opacity-0 hover:opacity-100",
         )}
       >
         {/* Progress track */}
@@ -1201,7 +1209,7 @@ export function MediaAttachment({ media, isOwn }) {
       <>
         <div
           className={cn(
-            "mb-1.5 w-full max-w-[280px] sm:max-w-xs md:max-w-sm overflow-hidden rounded-2xl border shadow-sm transition-all",
+            "mb-1.5 w-full max-w-70 sm:max-w-xs md:max-w-sm overflow-hidden rounded-2xl border shadow-sm transition-all",
             cardTone,
           )}
         >
@@ -1237,7 +1245,7 @@ export function MediaAttachment({ media, isOwn }) {
           )}
 
           {/* Bottom metadata and download row */}
-          <div className="flex items-center justify-between gap-2.5 border-t border-black/5 dark:border-white/10 px-3 py-2 bg-black/[0.02] dark:bg-white/[0.02]">
+          <div className="flex items-center justify-between gap-2.5 border-t border-black/5 dark:border-white/10 px-3 py-2 bg-black/2 dark:bg-white/2">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <div
                 className={cn(
