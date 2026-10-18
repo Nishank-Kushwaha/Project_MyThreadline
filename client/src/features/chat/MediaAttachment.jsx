@@ -1,4 +1,12 @@
-import React, { useEffect, useMemo, useState, lazy, Suspense } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+  lazy,
+  Suspense,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Download,
@@ -13,6 +21,12 @@ import {
   Loader2,
   X,
   AlertCircle,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  RotateCcw,
 } from "lucide-react";
 import { decryptMedia, formatFileSize } from "@/lib/e2ee/media";
 import { cn } from "@/lib/utils";
@@ -334,6 +348,391 @@ function DownloadLink({
   );
 }
 
+// ── Audio & Video Helpers ──────────────────────────────────────────────────
+
+function formatMediaTime(seconds) {
+  if (!seconds || isNaN(seconds) || !isFinite(seconds)) return "0:00";
+  const s = Math.floor(seconds);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  if (m < 60) {
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  }
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h}:${min.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+}
+
+// WhatsApp-style sleek interactive Audio Player with scrubbable waveform/progress
+function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
+  const audioRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSeeking, setIsSeeking] = useState(false);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const handleLoadedMetadata = () => {
+      if (audio.duration && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+    const handleTimeUpdate = () => {
+      if (!isSeeking) setCurrentTime(audio.currentTime);
+    };
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("timeupdate", handleTimeUpdate);
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    if (onError) audio.addEventListener("error", onError);
+
+    return () => {
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("timeupdate", handleTimeUpdate);
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      if (onError) audio.removeEventListener("error", onError);
+    };
+  }, [isSeeking, onError]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+    } else {
+      audio.play().catch(() => {});
+    }
+  };
+
+  const handleSeek = (e) => {
+    const val = parseFloat(e.target.value);
+    setCurrentTime(val);
+    if (audioRef.current) {
+      audioRef.current.currentTime = val;
+    }
+  };
+
+  const toggleSpeed = () => {
+    const rates = [1, 1.5, 2];
+    const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
+    setPlaybackRate(next);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = next;
+    }
+  };
+
+  const toggleMute = () => {
+    if (audioRef.current) {
+      audioRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  // 24 mock waveform bars with dynamic heights for WhatsApp voice-note look
+  const barHeights = useMemo(
+    () => [
+      28, 45, 60, 35, 80, 50, 95, 70, 40, 85, 100, 65, 45, 75, 90, 55, 30, 85,
+      60, 40, 70, 50, 35, 20,
+    ],
+    [],
+  );
+
+  return (
+    <div className="flex flex-col gap-2 p-3 sm:p-3.5 select-none">
+      <audio ref={audioRef} src={src} preload="metadata" />
+
+      {/* Main player controls row */}
+      <div className="flex items-center gap-3">
+        {/* Circular Play / Pause button */}
+        <button
+          type="button"
+          onClick={togglePlay}
+          aria-label={isPlaying ? "Pause audio" : "Play audio"}
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-md transition-all active:scale-95",
+            isOwn
+              ? "bg-primary text-primary-foreground hover:brightness-110"
+              : "bg-primary text-primary-foreground hover:bg-primary/90",
+          )}
+        >
+          {isPlaying ? (
+            <Pause className="h-5 w-5 fill-current" />
+          ) : (
+            <Play className="h-5 w-5 fill-current ml-0.5" />
+          )}
+        </button>
+
+        {/* Waveform & Scrubber */}
+        <div className="relative flex-1 flex flex-col justify-center min-w-0 py-1">
+          {/* Visual audio waveform bars */}
+          <div className="flex items-center gap-[2.5px] sm:gap-[3px] h-7 w-full overflow-hidden px-0.5">
+            {barHeights.map((h, i) => {
+              const barPercent = (i / (barHeights.length - 1)) * 100;
+              const isPassed = barPercent <= progressPercent;
+              return (
+                <div
+                  key={i}
+                  style={{ height: `${h}%` }}
+                  className={cn(
+                    "flex-1 rounded-full transition-colors duration-150 min-w-[2px]",
+                    isPassed
+                      ? isOwn
+                        ? "bg-primary dark:bg-primary"
+                        : "bg-primary"
+                      : isOwn
+                        ? "bg-foreground/20 dark:bg-white/20"
+                        : "bg-foreground/20 dark:bg-white/20",
+                  )}
+                />
+              );
+            })}
+          </div>
+
+          {/* Invisible interactive range input overlaid on waveform */}
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            step="0.05"
+            value={currentTime}
+            onMouseDown={() => setIsSeeking(true)}
+            onTouchStart={() => setIsSeeking(true)}
+            onChange={handleSeek}
+            onMouseUp={() => setIsSeeking(false)}
+            onTouchEnd={() => setIsSeeking(false)}
+            aria-label="Seek audio"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+
+          {/* Time & speed controls sub-row */}
+          <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground mt-1">
+            <span>
+              {formatMediaTime(currentTime)}{" "}
+              <span className="opacity-40">/</span>{" "}
+              {duration ? formatMediaTime(duration) : "--:--"}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleSpeed}
+                title="Change playback speed"
+                className="rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide bg-foreground/10 hover:bg-foreground/20 text-foreground transition active:scale-95"
+              >
+                {playbackRate}x
+              </button>
+              <button
+                type="button"
+                onClick={toggleMute}
+                title={isMuted ? "Unmute" : "Mute"}
+                className="opacity-70 hover:opacity-100 transition p-0.5"
+              >
+                {isMuted ? (
+                  <VolumeX className="h-3.5 w-3.5" />
+                ) : (
+                  <Volume2 className="h-3.5 w-3.5" />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// WhatsApp-style modern Video Card with overlay controls and thumbnail view
+function CustomVideoPlayer({ src, fileName, isOwn, onOpenFullscreen, onError }) {
+  const videoRef = useRef(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [showControls, setShowControls] = useState(false);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const onMeta = () => {
+      if (video.duration && isFinite(video.duration)) {
+        setDuration(video.duration);
+      }
+    };
+    const onTime = () => setCurrentTime(video.currentTime);
+    const onPlay = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    video.addEventListener("loadedmetadata", onMeta);
+    video.addEventListener("timeupdate", onTime);
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("ended", onEnded);
+    if (onError) video.addEventListener("error", onError);
+
+    return () => {
+      video.removeEventListener("loadedmetadata", onMeta);
+      video.removeEventListener("timeupdate", onTime);
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("ended", onEnded);
+      if (onError) video.removeEventListener("error", onError);
+    };
+  }, [onError]);
+
+  const togglePlay = (e) => {
+    e?.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying) video.pause();
+    else video.play().catch(() => {});
+  };
+
+  const toggleMute = (e) => {
+    e?.stopPropagation();
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted;
+      setIsMuted(!isMuted);
+    }
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div
+      className="group/video relative w-full overflow-hidden bg-black aspect-video max-h-80 flex items-center justify-center cursor-pointer select-none"
+      onMouseEnter={() => setShowControls(true)}
+      onMouseLeave={() => setShowControls(false)}
+      onClick={togglePlay}
+    >
+      <video
+        ref={videoRef}
+        src={src}
+        playsInline
+        preload="metadata"
+        className="h-full w-full object-contain"
+      />
+
+      {/* Floating Center Play Button when paused */}
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-[2px] transition-all">
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label="Play video"
+            className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-2xl transition hover:scale-110 active:scale-95"
+          >
+            <Play className="h-7 w-7 fill-current ml-1" />
+          </button>
+        </div>
+      )}
+
+      {/* Top badge: duration chip */}
+      <div className="absolute top-2.5 left-2.5 pointer-events-none">
+        <span className="rounded-md bg-black/60 px-2 py-0.5 font-mono text-[11px] font-medium text-white/90 backdrop-blur-md shadow">
+          {formatMediaTime(duration || currentTime)}
+        </span>
+      </div>
+
+      {/* Bottom overlay player bar (fades on hover or always visible when playing) */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2.5 pt-6 transition-opacity duration-200",
+          showControls || !isPlaying ? "opacity-100" : "opacity-0 hover:opacity-100",
+        )}
+      >
+        {/* Progress track */}
+        <div className="relative mb-2 flex items-center">
+          <div className="h-1.5 w-full rounded-full bg-white/20 overflow-hidden">
+            <div
+              style={{ width: `${progressPercent}%` }}
+              className="h-full bg-primary rounded-full transition-all duration-100"
+            />
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            step="0.1"
+            value={currentTime}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setCurrentTime(val);
+              if (videoRef.current) videoRef.current.currentTime = val;
+            }}
+            aria-label="Seek video"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+        </div>
+
+        {/* Bottom controls row */}
+        <div className="flex items-center justify-between text-white text-xs">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={togglePlay}
+              className="p-1 text-white/90 hover:text-white transition"
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? (
+                <Pause className="h-4 w-4 fill-current" />
+              ) : (
+                <Play className="h-4 w-4 fill-current" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="p-1 text-white/90 hover:text-white transition"
+              aria-label={isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted ? (
+                <VolumeX className="h-4 w-4" />
+              ) : (
+                <Volume2 className="h-4 w-4" />
+              )}
+            </button>
+            <span className="font-mono text-[11px] text-white/80">
+              {formatMediaTime(currentTime)} / {formatMediaTime(duration)}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenFullscreen}
+            className="p-1 text-white/90 hover:text-white transition"
+            title="Expand to Fullscreen"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function MediaAttachment({ media, isOwn }) {
@@ -505,11 +904,11 @@ export function MediaAttachment({ media, isOwn }) {
     );
   }
 
-  // ── Full-screen modal for images and text/code ────────────────────────
+  // ── Full-screen modal for images, videos, and text/code ───────────────
   const renderPreviewModal = () => {
-    if (!isModalOpen || !sourceUrl || view === "pdf" || view === "media")
-      return null;
-    if (!(view === "image" || isTextual)) return null;
+    if (!isModalOpen || !sourceUrl || view === "pdf") return null;
+    const isVideoView = view === "media" && info.kind === "video";
+    if (!(view === "image" || isTextual || isVideoView)) return null;
 
     return createPortal(
       <div
@@ -563,7 +962,17 @@ export function MediaAttachment({ media, isOwn }) {
           className="flex flex-1 overflow-hidden"
           onClick={(e) => e.stopPropagation()}
         >
-          {view === "image" ? (
+          {isVideoView ? (
+            <div className="flex flex-1 items-center justify-center overflow-hidden p-2 sm:p-4 bg-black/90">
+              <video
+                src={sourceUrl}
+                controls
+                autoPlay
+                playsInline
+                className="h-full w-full max-h-[88vh] max-w-[94vw] rounded-xl object-contain shadow-2xl"
+              />
+            </div>
+          ) : view === "image" ? (
             <div className="flex flex-1 items-center justify-center overflow-auto p-4">
               {/* <img> never executes scripts, even for SVG. */}
               <img
@@ -783,72 +1192,92 @@ export function MediaAttachment({ media, isOwn }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // AUDIO / VIDEO — inline player (only when the browser says it can play it)
+  // AUDIO / VIDEO — modern custom responsive players
   // A failing player drops back to the generic card below via previewBroken.
   // ══════════════════════════════════════════════════════════════════════════
   if (view === "media") {
     const onPlayerError = () => setPreviewBroken(true);
     return (
-      <div
-        className={cn(
-          "mb-1.5 max-w-sm overflow-hidden rounded-xl border",
-          cardTone,
-        )}
-      >
-        {isLoading ? (
-          <div className="flex h-20 items-center justify-center gap-2 text-xs opacity-70">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Decrypting {info.kind}…</span>
-          </div>
-        ) : displayError ? null : (
-          sourceUrl &&
-          (info.kind === "video" ? (
-            <video
-              src={sourceUrl}
-              controls
-              playsInline
-              preload="metadata"
-              onError={onPlayerError}
-              className="max-h-72 w-full bg-black"
-            />
-          ) : (
-            <div className="px-2 pt-2">
-              <audio
-                src={sourceUrl}
-                controls
-                preload="metadata"
-                onError={onPlayerError}
-                className="w-full"
-              />
+      <>
+        <div
+          className={cn(
+            "mb-1.5 w-full max-w-[280px] sm:max-w-xs md:max-w-sm overflow-hidden rounded-2xl border shadow-sm transition-all",
+            cardTone,
+          )}
+        >
+          {isLoading ? (
+            <div className="flex h-24 items-center justify-center gap-2.5 text-xs text-muted-foreground p-4">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span>Decrypting {info.kind}…</span>
             </div>
-          ))
-        )}
-
-        <div className="flex items-center gap-3 px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-foreground">
-              {displayName}
-            </p>
-            {displayError ? (
-              <p className="flex items-center gap-1 text-[10px] text-destructive">
-                <AlertCircle className="h-3 w-3 shrink-0" />
-                {displayError}
-              </p>
+          ) : displayError ? (
+            <div className="flex items-center gap-2 p-3 text-xs text-destructive bg-destructive/10">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{displayError}</span>
+            </div>
+          ) : (
+            sourceUrl &&
+            (info.kind === "video" ? (
+              <CustomVideoPlayer
+                src={sourceUrl}
+                fileName={displayName}
+                isOwn={isOwn}
+                onOpenFullscreen={() => setIsModalOpen(true)}
+                onError={onPlayerError}
+              />
             ) : (
-              <p className="text-[10px] text-muted-foreground">{metaLine}</p>
+              <CustomAudioPlayer
+                src={sourceUrl}
+                fileName={displayName}
+                metaLine={metaLine}
+                isOwn={isOwn}
+                onError={onPlayerError}
+              />
+            ))
+          )}
+
+          {/* Bottom metadata and download row */}
+          <div className="flex items-center justify-between gap-2.5 border-t border-black/5 dark:border-white/10 px-3 py-2 bg-black/[0.02] dark:bg-white/[0.02]">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
+              <div
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                  info.kind === "video"
+                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400"
+                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                )}
+              >
+                {info.kind === "video" ? (
+                  <FileVideo className="h-3.5 w-3.5" />
+                ) : (
+                  <FileAudio className="h-3.5 w-3.5" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold leading-tight text-foreground">
+                  {displayName}
+                </p>
+                <p className="truncate text-[10px] leading-tight text-muted-foreground">
+                  {metaLine}
+                </p>
+              </div>
+            </div>
+
+            {sourceUrl && !isLoading && !displayError && (
+              <DownloadLink
+                href={sourceUrl}
+                fileName={downloadName}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:scale-105 hover:bg-muted active:scale-95"
+              >
+                <Download className="h-3.5 w-3.5" />
+              </DownloadLink>
             )}
           </div>
-          {sourceUrl && !isLoading && !displayError && (
-            <DownloadLink
-              href={sourceUrl}
-              fileName={downloadName}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:scale-105 hover:bg-muted active:scale-95"
-            >
-              <Download className="h-4 w-4" />
-            </DownloadLink>
-          )}
         </div>
-      </div>
+
+        {/* Video Fullscreen Preview Modal */}
+        {renderPreviewModal()}
+      </>
     );
   }
 
