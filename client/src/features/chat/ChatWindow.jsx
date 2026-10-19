@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Users,
   Search,
+  ChevronDown,
 } from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
@@ -99,6 +100,11 @@ export function ChatWindow({
   const [showStickyDate, setShowStickyDate] = useState(false);
   const [scrollbarWidth, setScrollbarWidth] = useState(0);
   const stickyDateTimerRef = useRef(null);
+
+  // Scroll to bottom floating pill & unread messages counter
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const isNearBottomRef = useRef(true);
 
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
@@ -474,17 +480,32 @@ export function ChatWindow({
       el.scrollTop = el.scrollHeight - prevScrollHeight.current;
     } else if (scrollAction.current === "initial") {
       el.scrollTop = el.scrollHeight; // jump, no animation
+      isNearBottomRef.current = true;
+      setShowScrollBottom(false);
+      setUnreadCount(0);
     } else {
       // only follow when a NEW message arrived, not on receipts/reactions
-      const lastId = messages[messages.length - 1]?._id;
-      if (lastId !== lastMessageIdRef.current) {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      const lastMsg = messages[messages.length - 1];
+      const lastId = lastMsg?._id;
+
+      if (lastId && lastId !== lastMessageIdRef.current) {
+        const isOwn = lastMsg.sender?._id === currentUser.id;
+
+        // If it's my own message or I was already near the bottom, scroll down!
+        if (isOwn || isNearBottomRef.current) {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+          setUnreadCount(0);
+        } else {
+          // User is scrolled up reading older messages: don't hijack scroll, increment unread counter!
+          setUnreadCount((c) => c + 1);
+          setShowScrollBottom(true);
+        }
       }
     }
 
     lastMessageIdRef.current = messages[messages.length - 1]?._id ?? null;
     scrollAction.current = "append";
-  }, [messages]);
+  }, [messages, currentUser.id]);
 
   // stop typing when I leave the room or close the tab
   useEffect(() => stopTyping, [stopTyping]);
@@ -817,17 +838,27 @@ export function ChatWindow({
     clearTimeout(searchTimeoutRef.current);
   };
 
-  // Close search and reset sticky date when switching rooms
+  // Close search, reset sticky date, and reset scroll-to-bottom on room switch
   useEffect(() => {
     closeSearch();
     setShowStickyDate(false);
     setStickyDate("");
     clearTimeout(stickyDateTimerRef.current);
+    setShowScrollBottom(false);
+    setUnreadCount(0);
+    isNearBottomRef.current = true;
   }, [room.id]);
 
   // Clean up timer on unmount
   useEffect(() => {
     return () => clearTimeout(stickyDateTimerRef.current);
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    setUnreadCount(0);
+    setShowScrollBottom(false);
+    isNearBottomRef.current = true;
   }, []);
 
   // Measure scrollbar width to ensure the floating sticky date indicator aligns
@@ -856,7 +887,20 @@ export function ChatWindow({
     // 1. Pagination trigger
     if (container.scrollTop < 100) loadOlder();
 
-    // 2. WhatsApp-style sticky date indicator:
+    // 2. Scroll-to-bottom button & unread indicator:
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isNearBottom = distanceFromBottom < 120;
+    isNearBottomRef.current = isNearBottom;
+
+    if (isNearBottom) {
+      setShowScrollBottom(false);
+      setUnreadCount(0);
+    } else {
+      setShowScrollBottom(true);
+    }
+
+    // 3. WhatsApp-style sticky date indicator:
     const separators = container.querySelectorAll("[data-date-separator]");
     if (separators.length === 0) return;
 
@@ -1115,6 +1159,27 @@ export function ChatWindow({
           )}
           <div ref={bottomRef} />
         </div>
+
+        {/* "Scroll to Bottom" Floating Pill Button with Unread Counter */}
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+          title="Scroll to bottom"
+          className={cn(
+            "absolute bottom-4 right-5 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-border/80 bg-background/90 text-foreground/80 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-accent hover:text-foreground active:scale-95",
+            showScrollBottom
+              ? "scale-100 opacity-100 translate-y-0 pointer-events-auto"
+              : "pointer-events-none scale-90 opacity-0 translate-y-2",
+          )}
+        >
+          <ChevronDown className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1.5 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground shadow-sm animate-in zoom-in-50 duration-200">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {sendError && (
