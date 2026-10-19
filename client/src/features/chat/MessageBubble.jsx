@@ -87,10 +87,8 @@ export function MessageBubble({
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
   const [quickBarTop, setQuickBarTop] = useState(null);
-  const [copied, setCopied] = useState(false);
 
   const quickBarTimer = useRef(null);
-  const copiedTimerRef = useRef(null);
   const bubbleRef = useRef(null);
   const dotsRef = useRef(null);
   const quickBarWrapRef = useRef(null);
@@ -231,11 +229,6 @@ export function MessageBubble({
         document.body.removeChild(textArea);
       }
       toast.success("Message copied to clipboard", { duration: 2000 });
-      setCopied(true);
-      clearTimeout(copiedTimerRef.current);
-      copiedTimerRef.current = setTimeout(() => {
-        setCopied(false);
-      }, 1800);
     } catch (err) {
       console.error("Failed to copy message:", err);
       toast.error("Failed to copy message");
@@ -315,7 +308,6 @@ export function MessageBubble({
   useEffect(() => {
     return () => {
       clearQuickBarTimer();
-      clearTimeout(copiedTimerRef.current);
     };
   }, []);
 
