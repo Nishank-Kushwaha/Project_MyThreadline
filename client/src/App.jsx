@@ -20,7 +20,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
-          <Toaster position="bottom-center" richColors closeButton={false} />
+          <Toaster position="top-center" richColors closeButton={false} />
           <SocketProvider>
             <E2EEProvider>
               <NotificationManager />
