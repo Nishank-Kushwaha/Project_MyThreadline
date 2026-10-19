@@ -283,8 +283,10 @@ export function MessageBubble({
 
   return (
     <div
+      id={`message-${message._id}`}
+      data-message-id={message._id}
       className={cn(
-        "relative mb-3 flex items-center gap-3",
+        "relative mb-3 flex items-center gap-3 transition-colors duration-500",
         isOwn ? "justify-end" : "justify-start",
       )}
     >

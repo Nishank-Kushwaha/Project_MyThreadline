@@ -4,15 +4,52 @@ import User from "../../models/User.js";
 import { assertMembership } from "../rooms/rooms.service.js";
 import { viewForUser } from "./e2ee.validation.js";
 
-async function getRoomMessages(userId, roomId, { before, limit = 30 } = {}) {
+async function getRoomMessages(
+  userId,
+  roomId,
+  { before, around, limit = 30 } = {},
+) {
   await assertMembership(roomId, userId);
+
+  // If "around" is provided, fetch messages centered around this specific message ID
+  if (around) {
+    const target = await Message.findOne({ _id: around, roomId }).lean();
+    if (target) {
+      const half = Math.floor(limit / 2);
+
+      // Fetch messages before the target (including target)
+      const older = await Message.find({
+        roomId,
+        createdAt: { $lte: target.createdAt },
+      })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(half + 1)
+        .populate("sender", "name avatarUrl")
+        .populate("reactions.userId", "name")
+        .lean();
+
+      // Fetch messages after the target
+      const newer = await Message.find({
+        roomId,
+        createdAt: { $gt: target.createdAt },
+      })
+        .sort({ createdAt: 1, _id: 1 })
+        .limit(half)
+        .populate("sender", "name avatarUrl")
+        .populate("reactions.userId", "name")
+        .lean();
+
+      // Combine in chronological order: older reversed + newer
+      const combined = [...older.reverse(), ...newer];
+      return combined.map((m) => viewForUser(m, userId));
+    }
+  }
 
   const query = { roomId };
 
   if (before) query.createdAt = { $lt: new Date(before) };
 
   const messages = await Message.find(query)
-
     .sort({ createdAt: -1, _id: -1 }) // newest first, so "30 before this point" works
     .limit(limit)
     .populate("sender", "name avatarUrl")

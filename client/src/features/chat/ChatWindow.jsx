@@ -6,10 +6,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Menu, Shield, ShieldAlert, ShieldCheck, Users } from "lucide-react";
+import { Menu, Shield, ShieldAlert, ShieldCheck, Users, Search } from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
+import { MessageSearchBar } from "./MessageSearchBar";
 import { cn, formatLastSeen } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
@@ -29,6 +30,11 @@ import {
   decryptMessages,
   decryptReactions,
 } from "@/lib/e2ee/messages";
+import {
+  cacheDecryptedMessages,
+  searchLocalMessages,
+  removeCachedMessage,
+} from "@/lib/e2ee/messageStore";
 import { encryptMedia } from "@/lib/e2ee/media";
 import { uploadMediaRequest } from "@/api/mediaApi";
 
@@ -73,6 +79,13 @@ export function ChatWindow({
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [verifyUserId, setVerifyUserId] = useState(null);
+
+  // In-chat search states (IndexedDB-backed local E2EE search)
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]); // [{ id, text, fileName, createdAt }]
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
 
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
@@ -200,6 +213,7 @@ export function ChatWindow({
         if (cancelled) return;
         scrollAction.current = "initial";
         setMessages(readable);
+        cacheDecryptedMessages(room.id, readable);
         setHasMore(data.messages.length === PAGE_SIZE);
         setIsLoading(false); // same tick as setMessages so the scroll effect sees real content
       })
@@ -240,6 +254,7 @@ export function ChatWindow({
         const existing = new Set(prev.map((m) => m._id));
         return [...readable.filter((m) => !existing.has(m._id)), ...prev];
       });
+      cacheDecryptedMessages(room.id, readable);
       setHasMore(data.messages.length === PAGE_SIZE);
     } catch (err) {
       console.error("Failed to load older messages:", err);
@@ -286,6 +301,7 @@ export function ChatWindow({
       });
 
       setMessages((prev) => insertInOrder(prev, readable));
+      cacheDecryptedMessages(room.id, [readable]);
       removeTyping(message.sender._id); // they sent it, so they're no longer "typing"
       socket.emit("message:seen", { roomId: room.id }); // still open => still seen
     };
@@ -343,18 +359,21 @@ export function ChatWindow({
       }
 
       setMessages((prev) =>
-        prev.map((m) =>
-          m._id === messageId
-            ? {
-                ...m,
-                text: newText,
-                e2ee: e2ee ?? m.e2ee,
-                secret: secret ?? m.secret,
-                decrypt: decrypt ?? m.decrypt,
-                editedAt,
-              }
-            : m,
-        ),
+        prev.map((m) => {
+          if (m._id === messageId) {
+            const updated = {
+              ...m,
+              text: newText,
+              e2ee: e2ee ?? m.e2ee,
+              secret: secret ?? m.secret,
+              decrypt: decrypt ?? m.decrypt,
+              editedAt,
+            };
+            cacheDecryptedMessages(room.id, [updated]);
+            return updated;
+          }
+          return m;
+        }),
       );
     };
     // Someone deleted a message — the SERVER already cleared text/reactions;
@@ -362,6 +381,7 @@ export function ChatWindow({
     // placeholder ("This message was deleted") renders in its place.
     const handleDeleted = ({ roomId, messageId, deletedAt }) => {
       if (roomId !== room.id) return;
+      removeCachedMessage(messageId);
       setMessages((prev) =>
         prev.map((m) =>
           m._id === messageId
@@ -653,6 +673,136 @@ export function ChatWindow({
     });
   };
 
+  // ---------- 7) In-chat search logic (IndexedDB + around anchor pagination) ----------
+  const searchTimeoutRef = useRef(null);
+
+  const handleSearchQueryChange = (q) => {
+    setSearchQuery(q);
+    clearTimeout(searchTimeoutRef.current);
+
+    if (!q.trim()) {
+      setSearchResults([]);
+      setSearchIndex(0);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      // 1. Search locally in IndexedDB across all cached history
+      const localMatches = await searchLocalMessages(room.id, q);
+
+      // 2. Also check currently in-memory messages (in case newly added)
+      const qLower = q.trim().toLowerCase();
+      const inMemoryMatches = messages
+        .filter((m) => {
+          if (m.type === "system") return false;
+          const text = (m.text || "").toLowerCase();
+          const fileName = (m.media?.fileName || "").toLowerCase();
+          return text.includes(qLower) || fileName.includes(qLower);
+        })
+        .map((m) => ({
+          id: m._id,
+          text: m.text,
+          fileName: m.media?.fileName,
+          senderName: m.sender?.name,
+          createdAt: new Date(m.createdAt).getTime(),
+        }));
+
+      // Combine by unique ID
+      const map = new Map();
+      for (const item of inMemoryMatches) map.set(item.id, item);
+      for (const item of localMatches) map.set(item.id, item);
+
+      const allMatches = Array.from(map.values()).sort(
+        (a, b) => b.createdAt - a.createdAt, // newest matches first
+      );
+
+      setSearchResults(allMatches);
+      setSearchIndex(0);
+      setIsSearching(false);
+
+      if (allMatches.length > 0) {
+        jumpToMessage(allMatches[0].id);
+      }
+    }, 200);
+  };
+
+  const jumpToMessage = useCallback(
+    async (targetId) => {
+      if (!targetId) return;
+
+      const highlightElement = () => {
+        const el = document.getElementById(`message-${targetId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.remove("search-highlight-flash");
+          // Re-trigger CSS animation
+          void el.offsetWidth;
+          el.classList.add("search-highlight-flash");
+          setTimeout(() => el.classList.remove("search-highlight-flash"), 2200);
+          return true;
+        }
+        return false;
+      };
+
+      // 1. If message is already loaded in current view, scroll immediately
+      if (highlightElement()) return;
+
+      // 2. Message is in an older page: fetch messages around targetId from server
+      try {
+        scrollAction.current = "initial";
+        const { data } = await getRoomMessagesRequest(room.id, {
+          around: targetId,
+          limit: PAGE_SIZE,
+        });
+
+        const readable = await decryptMessages(data.messages, {
+          roomId: room.id,
+          userId: currentUser.id,
+        });
+
+        cacheDecryptedMessages(room.id, readable);
+        setMessages(readable);
+        setHasMore(true);
+
+        // Allow DOM to update, then scroll and highlight
+        setTimeout(() => {
+          highlightElement();
+        }, 80);
+      } catch (err) {
+        console.error("Failed to jump to message:", err);
+      }
+    },
+    [room.id, currentUser.id],
+  );
+
+  const handleSearchNavigate = (direction) => {
+    if (searchResults.length === 0) return;
+    let nextIndex;
+    if (direction === "next") {
+      // Go to older match
+      nextIndex = (searchIndex + 1) % searchResults.length;
+    } else {
+      // Go to newer match
+      nextIndex = (searchIndex - 1 + searchResults.length) % searchResults.length;
+    }
+    setSearchIndex(nextIndex);
+    jumpToMessage(searchResults[nextIndex].id);
+  };
+
+  const closeSearch = () => {
+    setIsSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchIndex(0);
+  };
+
+  // Close search when switching rooms
+  useEffect(() => {
+    closeSearch();
+  }, [room.id]);
+
   const handleScroll = (e) => {
     if (e.currentTarget.scrollTop < 100) loadOlder();
   };
@@ -708,6 +858,27 @@ export function ChatWindow({
           <p className="truncate text-sm font-semibold">{room.name}</p>
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         </div>
+        {/* Search in chat button */}
+        <button
+          onClick={() => {
+            if (isSearchOpen) {
+              closeSearch();
+            } else {
+              setIsSearchOpen(true);
+            }
+          }}
+          aria-label={isSearchOpen ? "Close search" : "Search messages"}
+          title={isSearchOpen ? "Close search" : "Search messages"}
+          className={cn(
+            "flex shrink-0 items-center rounded-md p-1.5 transition",
+            isSearchOpen
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          )}
+        >
+          <Search className="h-4 w-4" />
+        </button>
+
         {/* Private chats are always exactly 2 people, so there is nothing to manage. */}
         {contactStatus && encryption === "active" && (
           <button
@@ -741,6 +912,20 @@ export function ChatWindow({
           </button>
         )}
       </div>
+
+      {/* Expandable in-chat search bar */}
+      {isSearchOpen && (
+        <MessageSearchBar
+          query={searchQuery}
+          onQueryChange={handleSearchQueryChange}
+          matches={searchResults}
+          currentIndex={searchIndex}
+          totalFound={searchResults.length}
+          onNavigate={handleSearchNavigate}
+          onClose={closeSearch}
+          isSearching={isSearching}
+        />
+      )}
 
       <div
         ref={scrollRef}
