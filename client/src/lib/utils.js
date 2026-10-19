@@ -39,3 +39,30 @@ export function formatLastSeen(lastSeen) {
     return `Last seen yesterday at ${time}`;
   return `Last seen ${date.toLocaleDateString()}`;
 }
+
+// Formats a message date for WhatsApp-style separators:
+// "Today", "Yesterday", Day of week (e.g. "Sunday") if within the last 6 days, or "DD/MM/YYYY"
+export function formatDateSeparator(dateInput) {
+  if (!dateInput) return "";
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return "";
+
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  const diffDays = Math.round((todayStart - dateStart) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays > 1 && diffDays < 7) {
+    return date.toLocaleDateString(undefined, { weekday: "long" });
+  }
+
+  // DD/MM/YYYY or standard localized date
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+

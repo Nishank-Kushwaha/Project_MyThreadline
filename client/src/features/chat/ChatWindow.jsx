@@ -6,12 +6,19 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Menu, Shield, ShieldAlert, ShieldCheck, Users, Search } from "lucide-react";
+import {
+  Menu,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  Search,
+} from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { MessageSearchBar } from "./MessageSearchBar";
-import { cn, formatLastSeen } from "@/lib/utils";
+import { cn, formatLastSeen, formatDateSeparator } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
 import { EncryptionNotice } from "./EncryptionNotice";
@@ -86,6 +93,12 @@ export function ChatWindow({
   const [searchResults, setSearchResults] = useState([]); // [{ id, text, fileName, createdAt }]
   const [searchIndex, setSearchIndex] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
+
+  // WhatsApp-style floating sticky date indicator
+  const [stickyDate, setStickyDate] = useState("");
+  const [showStickyDate, setShowStickyDate] = useState(false);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
+  const stickyDateTimerRef = useRef(null);
 
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
@@ -560,7 +573,10 @@ export function ChatWindow({
               (err, response) =>
                 resolve(
                   err
-                    ? { success: false, message: "No response from the server." }
+                    ? {
+                        success: false,
+                        message: "No response from the server.",
+                      }
                     : response,
                 ),
             );
@@ -785,7 +801,8 @@ export function ChatWindow({
       nextIndex = (searchIndex + 1) % searchResults.length;
     } else {
       // Go to newer match
-      nextIndex = (searchIndex - 1 + searchResults.length) % searchResults.length;
+      nextIndex =
+        (searchIndex - 1 + searchResults.length) % searchResults.length;
     }
     setSearchIndex(nextIndex);
     jumpToMessage(searchResults[nextIndex].id);
@@ -796,15 +813,82 @@ export function ChatWindow({
     setSearchQuery("");
     setSearchResults([]);
     setSearchIndex(0);
+    setIsSearching(false);
+    clearTimeout(searchTimeoutRef.current);
   };
 
-  // Close search when switching rooms
+  // Close search and reset sticky date when switching rooms
   useEffect(() => {
     closeSearch();
+    setShowStickyDate(false);
+    setStickyDate("");
+    clearTimeout(stickyDateTimerRef.current);
   }, [room.id]);
 
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(stickyDateTimerRef.current);
+  }, []);
+
+  // Measure scrollbar width to ensure the floating sticky date indicator aligns
+  // on the exact same horizontal center as messages inside the scrollable container.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setScrollbarWidth(el.offsetWidth - el.clientWidth);
+  }, [messages]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (scrollRef.current) {
+        setScrollbarWidth(
+          scrollRef.current.offsetWidth - scrollRef.current.clientWidth,
+        );
+      }
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const handleScroll = (e) => {
-    if (e.currentTarget.scrollTop < 100) loadOlder();
+    const container = e.currentTarget;
+
+    // 1. Pagination trigger
+    if (container.scrollTop < 100) loadOlder();
+
+    // 2. WhatsApp-style sticky date indicator:
+    const separators = container.querySelectorAll("[data-date-separator]");
+    if (separators.length === 0) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const topEdge = containerRect.top;
+
+    // Determine the active date: find the date of messages currently at the top of viewport.
+    // It is the last separator that has reached or scrolled past the top reference line.
+    let activeDate = "";
+    for (const sep of separators) {
+      const sepRect = sep.getBoundingClientRect();
+      if (sepRect.top <= topEdge + 10) {
+        activeDate = sep.getAttribute("data-date-label") || "";
+      } else {
+        break;
+      }
+    }
+
+    if (activeDate) {
+      setStickyDate(activeDate);
+      setShowStickyDate(true);
+
+      // Reset the 3-second inactivity countdown on every scroll event
+      clearTimeout(stickyDateTimerRef.current);
+      stickyDateTimerRef.current = setTimeout(() => {
+        setShowStickyDate(false);
+      }, 3000);
+    } else {
+      // All separators are below the top edge (e.g. user scrolled to the very top of history)
+      setShowStickyDate(false);
+      clearTimeout(stickyDateTimerRef.current);
+    }
   };
 
   // The first encrypted message that follows older plaintext ones: a divider
@@ -927,60 +1011,110 @@ export function ChatWindow({
         />
       )}
 
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-4"
-      >
-        <KeyChangeNotice changes={changedContacts} onReview={setVerifyUserId} />
-        {!isLoading && encryption === "active" && (
-          <EncryptionNotice
-            kind="active"
-            name={room.name}
-            isGroup={room.type === "group"}
-          />
-        )}
-        {!isLoading && encryption === "pending" && (
-          <EncryptionNotice kind="pending" names={pendingNames} />
-        )}
+      {/* Chat scroll area wrapper with floating sticky date indicator */}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        {/* Floating sticky date pill (shows while scrolling, fades out after 3s of inactivity) */}
+        <div
+          aria-hidden={!showStickyDate}
+          style={{ right: scrollbarWidth }}
+          className={cn(
+            "pointer-events-none absolute top-3 inset-x-0 z-20 flex justify-center transition-all duration-300",
+            showStickyDate
+              ? "opacity-100 translate-y-0"
+              : "opacity-0 -translate-y-1",
+          )}
+        >
+          <span className="rounded-full border border-border/70 bg-background/90 px-3.5 py-1 font-sans text-xs font-semibold text-foreground/90 shadow-md backdrop-blur-md">
+            {stickyDate}
+          </span>
+        </div>
 
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading messages…</p>
-        ) : messages.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No messages yet — say hello.
-          </p>
-        ) : (
-          messages.map((m) =>
-            m.type === "system" ? (
-              <SystemMessage
-                key={m._id}
-                message={m}
-                currentUserId={currentUser.id}
-              />
-            ) : (
-              <React.Fragment key={m._id}>
-                {m._id === encryptionStartsAt && (
-                  <EncryptionNotice kind="started" name={room.name} />
-                )}
-                <MessageBubble
-                  message={m}
-                  isOwn={m.sender._id === currentUser.id}
-                  isGroup={room.type === "group"}
-                  recipientCount={recipientCount}
-                  currentUserId={currentUser.id}
-                  editable={
-                    m.encrypted ? m.decrypt === "ok" : encryption !== "active"
-                  }
-                  onReact={handleReact}
-                  onEdit={handleEditMessage}
-                  onDelete={handleDeleteMessage}
-                />
-              </React.Fragment>
-            ),
-          )
-        )}
-        <div ref={bottomRef} />
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto p-4"
+        >
+          <KeyChangeNotice
+            changes={changedContacts}
+            onReview={setVerifyUserId}
+          />
+          {!isLoading && encryption === "active" && (
+            <EncryptionNotice
+              kind="active"
+              name={room.name}
+              isGroup={room.type === "group"}
+            />
+          )}
+          {!isLoading && encryption === "pending" && (
+            <EncryptionNotice kind="pending" names={pendingNames} />
+          )}
+
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading messages…</p>
+          ) : messages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No messages yet — say hello.
+            </p>
+          ) : (
+            messages.map((m, index) => {
+              const prevMsg = index > 0 ? messages[index - 1] : null;
+              const msgDate = new Date(m.createdAt).toDateString();
+              const prevDate = prevMsg
+                ? new Date(prevMsg.createdAt).toDateString()
+                : null;
+              const showDateSeparator = !prevDate || msgDate !== prevDate;
+              const dateLabel = showDateSeparator
+                ? formatDateSeparator(m.createdAt)
+                : null;
+
+              return (
+                <React.Fragment key={m._id}>
+                  {/* Permanent date separator (belongs to normal message list, scrolls naturally) */}
+                  {showDateSeparator && dateLabel && (
+                    <div
+                      data-date-separator="true"
+                      data-date-label={dateLabel}
+                      className="my-3 flex justify-center select-none"
+                    >
+                      <span className="rounded-full border border-border/60 bg-muted/90 px-3.5 py-1 font-sans text-xs font-semibold text-muted-foreground shadow-sm backdrop-blur-md">
+                        {dateLabel}
+                      </span>
+                    </div>
+                  )}
+                  {m.type === "system" ? (
+                    <SystemMessage
+                      key={m._id}
+                      message={m}
+                      currentUserId={currentUser.id}
+                    />
+                  ) : (
+                    <>
+                      {m._id === encryptionStartsAt && (
+                        <EncryptionNotice kind="started" name={room.name} />
+                      )}
+                      <MessageBubble
+                        message={m}
+                        isOwn={m.sender._id === currentUser.id}
+                        isGroup={room.type === "group"}
+                        recipientCount={recipientCount}
+                        currentUserId={currentUser.id}
+                        editable={
+                          m.encrypted
+                            ? m.decrypt === "ok"
+                            : encryption !== "active"
+                        }
+                        onReact={handleReact}
+                        onEdit={handleEditMessage}
+                        onDelete={handleDeleteMessage}
+                      />
+                    </>
+                  )}
+                </React.Fragment>
+              );
+            })
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
       {sendError && (
