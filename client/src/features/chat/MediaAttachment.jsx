@@ -36,6 +36,8 @@ const PdfViewer = lazy(() =>
   import("./PdfViewer").then((m) => ({ default: m.PdfViewer })),
 );
 
+import { GifVideoPlayer, isGifVideo } from "./GifVideoPlayer";
+
 // ── File-type detection ────────────────────────────────────────────────────
 // MIME types are frequently missing ("" from some OSes), generic
 // ("application/octet-stream") or simply wrong (".ts" is often reported as
@@ -782,6 +784,13 @@ export function MediaAttachment({ media, isOwn }) {
   if (info.kind === "pdf") view = "pdf";
   else if (info.kind === "image" && !previewBroken) view = "image";
   else if (
+    info.kind === "video" &&
+    canPlay &&
+    !previewBroken &&
+    isGifVideo(media, info.kind)
+  )
+    view = "gif";
+  else if (
     (info.kind === "audio" || info.kind === "video") &&
     canPlay &&
     !previewBroken
@@ -1200,8 +1209,33 @@ export function MediaAttachment({ media, isOwn }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
+  // GIF VIDEO ATTACHMENT — WhatsApp-style looping clip
+  // Short silent videos flagged as GIFs (media.isGif / media.gifPlayback or a
+  // "gif" filename hint) skip the regular video player: no controls, no seek
+  // bar, no duration chip. Shows the first frame with a round "GIF" badge;
+  // tap plays it muted, and when it ends it rewinds to the first frame.
+  // Normal videos keep using CustomVideoPlayer below.
+  // A failing player drops back to the generic card via previewBroken.
+  // ══════════════════════════════════════════════════════════════════════════
+  if (view === "gif") {
+    return (
+      <div className="mb-1.5 overflow-hidden rounded-xl">
+        <GifVideoPlayer
+          src={sourceUrl}
+          isLoading={isLoading}
+          error={displayError}
+          timeLabel={media.timeLabel}
+          onError={() => setPreviewBroken(true)}
+        />
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // AUDIO / VIDEO — modern custom responsive players
-  // A failing player drops back to the generic card below via previewBroken.
+  // Regular videos and audio only; GIF-style clips are handled by the
+  // "gif" view above. A failing player drops back to the generic card
+  // below via previewBroken.
   // ══════════════════════════════════════════════════════════════════════════
   if (view === "media") {
     const onPlayerError = () => setPreviewBroken(true);
