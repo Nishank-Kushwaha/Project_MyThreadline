@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import {
   Check,
   CheckCheck,
@@ -9,6 +10,7 @@ import {
   X as XIcon,
   MoreVertical,
   Lock,
+  Copy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuickReactBar } from "./QuickReactBar";
@@ -27,9 +29,9 @@ const EmojiPickerPopover = lazy(() =>
 
 const QUICK_BAR_DURATION = 3000;
 
-// Message options menu size (w-44 = 176px; two rows + padding ≈ 88px)
+// Message options menu size (w-44 = 176px; three rows + padding ≈ 124px)
 const MENU_W = 176;
-const MENU_H = 88;
+const MENU_H = 124;
 const MOBILE_BREAKPOINT = 640;
 
 const clamp = (v, min, max) => Math.max(min, Math.min(v, max));
@@ -85,8 +87,10 @@ export function MessageBubble({
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
   const [quickBarTop, setQuickBarTop] = useState(null);
+  const [copied, setCopied] = useState(false);
 
   const quickBarTimer = useRef(null);
+  const copiedTimerRef = useRef(null);
   const bubbleRef = useRef(null);
   const dotsRef = useRef(null);
   const quickBarWrapRef = useRef(null);
@@ -208,6 +212,37 @@ export function MessageBubble({
   };
 
   // --------------------------------------------------
+  // COPY MESSAGE TEXT
+  // --------------------------------------------------
+
+  const copyMessageText = async () => {
+    if (!message.text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message.text);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = message.text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+      toast.success("Message copied to clipboard", { duration: 2000 });
+      setCopied(true);
+      clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false);
+      }, 1800);
+    } catch (err) {
+      console.error("Failed to copy message:", err);
+      toast.error("Failed to copy message");
+    }
+  };
+
+  // --------------------------------------------------
   // MESSAGE OPTIONS MENU (rendered in a portal, fixed position)
   // Mobile  : centered horizontally on screen, vertically centered
   //           on the message bubble it came from.
@@ -224,20 +259,22 @@ export function MessageBubble({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
+    const menuH = isOwn ? (editable && !message.media ? 124 : 84) : 44;
+
     let top;
     let left;
 
     if (vw < MOBILE_BREAKPOINT) {
       left = (vw - MENU_W) / 2;
-      top = b.top + b.height / 2 - MENU_H / 2;
+      top = b.top + b.height / 2 - menuH / 2;
     } else {
       left = d.right - MENU_W;
       top = d.bottom + 4;
-      if (top + MENU_H > vh - 8) top = d.top - MENU_H - 4;
+      if (top + menuH > vh - 8) top = d.top - menuH - 4;
     }
 
     setMenuPos({
-      top: clamp(top, 8, vh - MENU_H - 8),
+      top: clamp(top, 8, vh - menuH - 8),
       left: clamp(left, 8, vw - MENU_W - 8),
     });
     setShowMessageMenu(true);
@@ -278,6 +315,7 @@ export function MessageBubble({
   useEffect(() => {
     return () => {
       clearQuickBarTimer();
+      clearTimeout(copiedTimerRef.current);
     };
   }, []);
 
@@ -322,8 +360,6 @@ export function MessageBubble({
                 "before:absolute before:-right-2 before:top-0",
                 "before:h-3 before:w-2 before:bg-primary",
                 "before:[clip-path:polygon(0_0,100%_0,0_100%)]",
-                // leave room for the dots so they don't cover text
-                !isDeleted && !isEditing && "pr-8",
               ],
 
               // Receiver: square top-left corner + tail pointing out to the left
@@ -334,11 +370,14 @@ export function MessageBubble({
                 "before:[clip-path:polygon(0_0,100%_0,100%_100%)]",
               ],
 
+              // Leave room for the three dots so they don't cover text
+              !isDeleted && !isEditing && (isOwn || message.text) && "pr-8",
+
               isDeleted && "opacity-60",
             )}
           >
-            {/* ---------- THREE DOTS INSIDE BUBBLE (OWN ONLY) ---------- */}
-            {isOwn && !isDeleted && !isEditing && (
+            {/* ---------- THREE DOTS INSIDE BUBBLE (FOR ALL USERS) ---------- */}
+            {!isDeleted && !isEditing && (isOwn || message.text) && (
               <div className="absolute right-1 top-1 z-10">
                 <button
                   ref={dotsRef}
@@ -347,13 +386,17 @@ export function MessageBubble({
                   aria-label="Message options"
                   aria-expanded={showMessageMenu}
                   className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full",
-                    "text-primary-foreground/80 transition-opacity duration-150",
-                    "hover:bg-black/15 hover:text-primary-foreground",
+                    "flex h-6 w-6 items-center justify-center rounded-full transition-opacity duration-150",
+                    isOwn
+                      ? "text-primary-foreground/80 hover:bg-black/15 hover:text-primary-foreground"
+                      : "text-secondary-foreground/80 hover:bg-black/10 dark:hover:bg-white/10 hover:text-secondary-foreground",
                     // visible on hover (desktop), always on touch screens
                     "opacity-100 md:opacity-0 md:group-hover:opacity-100",
                     "focus-visible:opacity-100",
-                    showMessageMenu && "md:opacity-100 bg-black/15",
+                    showMessageMenu &&
+                      (isOwn
+                        ? "md:opacity-100 bg-black/15"
+                        : "md:opacity-100 bg-black/10 dark:bg-white/10"),
                   )}
                 >
                   <MoreVertical className="h-4 w-4" />
@@ -376,7 +419,22 @@ export function MessageBubble({
                         }}
                         className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
                       >
-                        {editable && !message.media && (
+                        {message.text && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              copyMessageText();
+                            }}
+                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                          >
+                            <Copy className="h-4 w-4" />
+                            <span>Copy text</span>
+                          </button>
+                        )}
+
+                        {isOwn && editable && !message.media && (
                           <button
                             type="button"
                             role="menuitem"
@@ -391,18 +449,20 @@ export function MessageBubble({
                           </button>
                         )}
 
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            handleDeleteClick();
-                          }}
-                          className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          <span>Delete message</span>
-                        </button>
+                        {isOwn && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              handleDeleteClick();
+                            }}
+                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span>Delete message</span>
+                          </button>
+                        )}
                       </div>
                     </div>,
                     document.body,

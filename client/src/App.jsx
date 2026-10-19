@@ -13,12 +13,14 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { E2EEProvider } from "@/features/e2ee/E2EEContext";
 
 import { NotificationManager } from "@/features/chat/NotificationManager";
+import { Toaster } from "@/components/ui/sonner";
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
+          <Toaster position="bottom-center" richColors closeButton={false} />
           <SocketProvider>
             <E2EEProvider>
               <NotificationManager />
