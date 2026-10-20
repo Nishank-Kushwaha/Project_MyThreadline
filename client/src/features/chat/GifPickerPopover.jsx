@@ -1,19 +1,18 @@
 import React, { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { GifPicker } from "gif-picker-react";
-import { Klipy } from "gif-picker-react/providers/klipy";
+import { Giphy } from "gif-picker-react/providers/giphy";
 import "gif-picker-react/style.css";
 import { usePickerTheme } from "@/context/usePickerTheme";
 
 // Same overlay pattern as EmojiPickerPopover (backdrop + centered card).
 // Lazy-loaded from GifPickerButton, so it only downloads when first opened.
 export function GifPickerPopover({ onOpenChange, onPick }) {
-  const apiKey = import.meta.env.VITE_KLIPY_API_KEY;
+  const apiKey = import.meta.env.VITE_GIPHY_API_KEY;
   const pickerTheme = usePickerTheme();
 
   const provider = useMemo(
-    () =>
-      apiKey ? Klipy(apiKey, { locale: "en_IN", showBranding: true }) : null,
+    () => (apiKey ? Giphy(apiKey, { lang: "en", rating: "pg" }) : null),
     [apiKey],
   );
 
