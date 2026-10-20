@@ -109,3 +109,10 @@
     }
   }
 }
+
+/* GIF picker: follow the app theme (all 19 themes via the CSS variables) */
+.gif-popover .GifPickerReact.GifPickerReact {
+  --gpr-bg-color: hsl(var(--card));
+  --gpr-text-color: hsl(var(--foreground));
+  --gpr-highlight-color: hsl(var(--primary));
+}

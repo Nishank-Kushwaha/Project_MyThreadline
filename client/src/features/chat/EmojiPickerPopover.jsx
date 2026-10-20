@@ -1,5 +1,6 @@
 import React from "react";
 import EmojiPicker, { Theme } from "emoji-picker-react";
+import { usePickerTheme } from "@/context/usePickerTheme"; // same path as in GifPickerPopover
 
 // Reuses the same overlay pattern as components/ui/dialog.jsx (backdrop +
 // centered card) rather than pixel-precise anchoring next to the bubble —
@@ -10,6 +11,9 @@ import EmojiPicker, { Theme } from "emoji-picker-react";
 // ~340KB to the main bundle when it was a normal top-level import. Nobody
 // should pay that cost just for opening the app, only for opening the picker.
 export function EmojiPickerPopover({ onOpenChange, onPick }) {
+  // "dark" | "light", resolved from the active theme (including custom ones)
+  const pickerTheme = usePickerTheme() === "dark" ? Theme.DARK : Theme.LIGHT;
+
   return (
     <div className="fixed inset-0 z-70 flex items-center justify-center p-4">
       <div
@@ -18,7 +22,7 @@ export function EmojiPickerPopover({ onOpenChange, onPick }) {
       />
       <div className="relative z-10">
         <EmojiPicker
-          theme={Theme.DARK}
+          theme={pickerTheme}
           autoFocusSearch
           lazyLoadEmojis
           onEmojiClick={(emojiData) => {

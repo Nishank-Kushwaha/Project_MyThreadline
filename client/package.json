@@ -16,6 +16,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "emoji-picker-react": "^4.22.3",
+    "gif-picker-react": "^2.0.0",
     "lucide-react": "^1.48.0",
     "pdfjs-dist": "^6.4.299",
     "qrcode": "^1.5.4",

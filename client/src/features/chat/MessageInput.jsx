@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { formatFileSize } from "@/lib/e2ee/media";
 
+import { GifPickerButton } from "./GifPickerButton";
+import { gifToFile } from "./gifToFile";
+
 // 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
@@ -111,6 +114,7 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
   const [filePreview, setFilePreview] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [fileError, setFileError] = useState("");
+  const [gifLoading, setGifLoading] = useState(false);
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -149,31 +153,35 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
     };
   }, [filePreview]);
 
-  const handleFileSelect = (e) => {
+  // Shared by the file dialog and the GIF picker. Returns true if accepted.
+  const acceptFile = (file) => {
     setFileError("");
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Clearing the input lets the user pick the same file again after an error.
-    const reject = (message) => {
-      setFileError(message);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    };
-
-    if (file.size === 0) return reject("This file is empty.");
-    if (file.size > MAX_FILE_SIZE_BYTES)
-      return reject("File exceeds the 15 MiB limit.");
-    if (!isAllowedFile(file)) return reject("This file type isn't supported.");
-
-    if (filePreview) URL.revokeObjectURL(filePreview);
-
-    setSelectedFile(file);
-    if (file.type.startsWith("image/")) {
-      setFilePreview(URL.createObjectURL(file));
-    } else {
-      setFilePreview(null);
+    if (file.size === 0) {
+      setFileError("This file is empty.");
+      return false;
+    }
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setFileError("File exceeds the 15 MiB limit.");
+      return false;
+    }
+    if (!isAllowedFile(file)) {
+      setFileError("This file type isn't supported.");
+      return false;
     }
 
+    if (filePreview) URL.revokeObjectURL(filePreview);
+    setSelectedFile(file);
+    setFilePreview(
+      file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+    );
+    return true;
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    acceptFile(file);
+    // Clearing the input lets the user pick the same file again.
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -214,6 +222,18 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
     send();
   };
 
+  const handleGifSelect = async (gif) => {
+    setGifLoading(true);
+    setFileError("");
+    try {
+      acceptFile(await gifToFile(gif));
+    } catch {
+      setFileError("Couldn't load that GIF. Please try another.");
+    } finally {
+      setGifLoading(false);
+    }
+  };
+
   // Enter sends, Shift+Enter adds a new line (like WhatsApp Web).
   // On phones/tablets (touch) Enter always adds a new line; use the button.
   const handleKeyDown = (e) => {
@@ -234,6 +254,13 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
       {/* File error message */}
       {fileError && (
         <div className="mb-2 text-xs text-destructive">{fileError}</div>
+      )}
+
+      {gifLoading && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading GIF…
+        </div>
       )}
 
       {/* Selected file preview card */}
@@ -294,6 +321,11 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
         >
           <Paperclip className="h-4 w-4" />
         </button>
+
+        <GifPickerButton
+          onSelect={handleGifSelect}
+          disabled={isSending || gifLoading}
+        />
 
         <textarea
           ref={textareaRef}
