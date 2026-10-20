@@ -13,13 +13,37 @@ import { cn } from "@/lib/utils";
  *   1. explicit flag: media.isGif / media.gifPlayback
  *   2. filename hint: "*.gif.mp4", "*_gif.mp4", "*.gif"
  */
-export function isGifVideo(media, kind) {
-  if (kind !== "video" || !media) return false;
-  if (media.isGif === true || media.gifPlayback === true) return true;
-  const name = String(media.fileName || "").toLowerCase();
-  return /(^|[._\-\s])gif([._\-\s]|$)/.test(name);
-}
+const GIF_MIME = /^(image|video)\/gif$/i;
+const GIF_EXT = /\.(gif|gifv)(\?.*)?$/i;
 
+export function isGifVideo(media, kind) {
+  if (!media) return false;
+
+  // 1. Explicit flags from the platform
+  if (media.isGif === true || media.gifPlayback === true) return true;
+
+  // 2. MIME type (check the common field names)
+  const mime = String(
+    media.mimeType || media.mimetype || media.contentType || media.type || "",
+  );
+  if (GIF_MIME.test(mime)) return true;
+
+  // 3. Extension on the file name or URL
+  const name = String(
+    media.fileName ||
+      media.filename ||
+      media.name ||
+      media.url ||
+      media.uri ||
+      "",
+  ).toLowerCase();
+  if (GIF_EXT.test(name)) return true;
+
+  // 4. For videos only: "gif" as a standalone token in the name
+  if (kind === "video" && /(^|[._\-\s])gif([._\-\s]|$)/.test(name)) return true;
+
+  return false;
+}
 export function GifVideoPlayer({
   src,
   isLoading,

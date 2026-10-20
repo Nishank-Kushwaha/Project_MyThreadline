@@ -37,6 +37,7 @@ const PdfViewer = lazy(() =>
 );
 
 import { GifVideoPlayer, isGifVideo } from "./GifVideoPlayer";
+import { GifImagePlayer } from "./GifImagePlayer";
 
 // ── File-type detection ────────────────────────────────────────────────────
 // MIME types are frequently missing ("" from some OSes), generic
@@ -779,17 +780,17 @@ export function MediaAttachment({ media, isOwn }) {
     [info.kind, playMime],
   );
 
-  // Which presentation to use: image | pdf | media | generic
+  const isGifImage =
+    info.kind === "image" && (info.mime === "image/gif" || info.ext === "gif");
+  const isGifClip = info.kind === "video" && isGifVideo(media, info.kind);
+
+  // Which presentation to use: gifimage | image | pdf | gif | media | generic
   let view = "generic";
   if (info.kind === "pdf") view = "pdf";
+  else if (isGifImage && !previewBroken)
+    view = "gifimage"; // must be before "image"
   else if (info.kind === "image" && !previewBroken) view = "image";
-  else if (
-    info.kind === "video" &&
-    canPlay &&
-    !previewBroken &&
-    isGifVideo(media, info.kind)
-  )
-    view = "gif";
+  else if (isGifClip && canPlay && !previewBroken) view = "gif";
   else if (
     (info.kind === "audio" || info.kind === "video") &&
     canPlay &&
@@ -1221,6 +1222,20 @@ export function MediaAttachment({ media, isOwn }) {
     return (
       <div className="mb-1.5 overflow-hidden rounded-xl">
         <GifVideoPlayer
+          src={sourceUrl}
+          isLoading={isLoading}
+          error={displayError}
+          timeLabel={media.timeLabel}
+          onError={() => setPreviewBroken(true)}
+        />
+      </div>
+    );
+  }
+
+  if (view === "gifimage") {
+    return (
+      <div className="mb-1.5 overflow-hidden rounded-xl">
+        <GifImagePlayer
           src={sourceUrl}
           isLoading={isLoading}
           error={displayError}
