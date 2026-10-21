@@ -66,7 +66,7 @@ export async function buildOutgoingMessage({
     recipients: info.devices,
   });
 
-  return { e2ee: envelope, ...(replyTo && { replyTo }) };
+  return { e2ee: envelope };
 }
 
 // Plaintext and system messages come back unchanged. Encrypted ones come back

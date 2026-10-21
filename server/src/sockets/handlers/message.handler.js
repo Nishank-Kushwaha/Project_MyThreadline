@@ -61,11 +61,17 @@ function registerMessageHandlers(io, socket) {
           );
         }
 
-        // If chat is E2EE, media cannot be sent unencrypted outside e2ee!
+        // In E2EE chats, all media and reply metadata are sealed inside e2ee
         if (media) {
           throw new ApiError(
             400,
             "Unencrypted media is not allowed in an end-to-end encrypted chat.",
+          );
+        }
+        if (replyTo) {
+          throw new ApiError(
+            400,
+            "Unencrypted reply data is not allowed in an end-to-end encrypted chat.",
           );
         }
 
@@ -101,7 +107,7 @@ function registerMessageHandlers(io, socket) {
         sender: socket.userId,
         encrypted: Boolean(envelope),
         text: envelope ? "" : (text?.trim() || ""),
-        ...(replyTo && {
+        ...(replyTo && !envelope && {
           replyTo: {
             messageId: replyTo.messageId,
             senderName: replyTo.senderName || "",
