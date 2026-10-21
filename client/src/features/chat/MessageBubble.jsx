@@ -19,6 +19,11 @@ import { ReactionPills } from "./ReactionPills";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { MediaAttachment } from "./MediaAttachment";
+import {
+  FormattedMessageText,
+  LinkPreviewCard,
+  extractFirstUrl,
+} from "./LinkPreview";
 
 // Code-split: emoji-picker-react's emoji dataset only downloads when
 // someone actually opens the picker.
@@ -724,10 +729,17 @@ export function MessageBubble({
                     {message.media && (
                       <MediaAttachment media={message.media} isOwn={isOwn} />
                     )}
+                    {message.text && !message.media && (
+                      <LinkPreviewCard
+                        url={extractFirstUrl(message.text)}
+                        isOwn={isOwn}
+                      />
+                    )}
                     {message.text && (
-                      <p className="whitespace-pre-wrap wrap-break-word text-sm">
-                        {message.text}
-                      </p>
+                      <FormattedMessageText
+                        text={message.text}
+                        isOwn={isOwn}
+                      />
                     )}
                   </>
                 )}

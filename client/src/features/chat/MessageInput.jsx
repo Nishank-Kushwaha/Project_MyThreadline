@@ -19,6 +19,7 @@ import { formatFileSize } from "@/lib/e2ee/media";
 
 import { GifPickerButton } from "./GifPickerButton";
 import { gifToFile } from "./gifToFile";
+import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
 
 // 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
@@ -124,6 +125,10 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const [fileError, setFileError] = useState("");
   const [gifLoading, setGifLoading] = useState(false);
+  const [dismissedUrl, setDismissedUrl] = useState(null);
+
+  const detectedUrl = !selectedFile ? extractFirstUrl(text) : null;
+  const showLinkPreview = Boolean(detectedUrl && detectedUrl !== dismissedUrl);
 
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -257,6 +262,7 @@ export function MessageInput({
       const sent = await onSend(trimmed, selectedFile);
       if (sent !== false) {
         setText("");
+        setDismissedUrl(null);
         handleRemoveFile();
       }
     } finally {
@@ -342,6 +348,26 @@ export function MessageInput({
         <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Loading GIF…
+        </div>
+      )}
+
+      {/* Real-time Link Preview Banner (WhatsApp style, shown above input when URL is pasted/typed) */}
+      {showLinkPreview && (
+        <div className="relative mb-2 overflow-hidden rounded-2xl border border-input bg-secondary/60 p-2 pr-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <LinkPreviewCard url={detectedUrl} isOwn={false} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedUrl(detectedUrl)}
+              aria-label="Remove link preview"
+              title="Remove preview"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
 
