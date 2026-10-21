@@ -333,7 +333,18 @@ export function MessageBubble({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    const menuH = isOwn ? (editable && !message.media ? 124 : 84) : 44;
+    const hasCopy = Boolean(message.text);
+    const hasReply = Boolean(onReply && !isDeleted);
+    const hasEdit = Boolean(isOwn && editable && !message.media);
+    const hasDelete = Boolean(isOwn);
+
+    const itemCount =
+      (hasReply ? 1 : 0) +
+      (hasCopy ? 1 : 0) +
+      (hasEdit ? 1 : 0) +
+      (hasDelete ? 1 : 0);
+
+    const menuH = itemCount * 40 + 8;
 
     let top;
     let left;
@@ -476,13 +487,13 @@ export function MessageBubble({
               ],
 
               // Leave room for the three dots so they don't cover text
-              !isDeleted && !isEditing && (isOwn || message.text) && "pr-8",
+              !isDeleted && !isEditing && (isOwn || message.text || message.media) && "pr-8",
 
               isDeleted && "opacity-60",
             )}
           >
             {/* ---------- THREE DOTS INSIDE BUBBLE (FOR ALL USERS) ---------- */}
-            {!isDeleted && !isEditing && (isOwn || message.text) && (
+            {!isDeleted && !isEditing && (isOwn || message.text || message.media) && (
               <div className="absolute right-1 top-1 z-10">
                 <button
                   ref={dotsRef}
