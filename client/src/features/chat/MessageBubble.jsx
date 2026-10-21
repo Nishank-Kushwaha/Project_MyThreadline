@@ -165,21 +165,38 @@ export function MessageBubble({
     let snippet = message.text || "";
     let mediaType = "";
     if (message.media) {
-      if (message.media.fileType?.startsWith("image/")) mediaType = "image";
-      else if (message.media.fileType?.startsWith("video/"))
+      const mime = String(message.media.fileType || "").toLowerCase();
+      const fname = String(message.media.fileName || "").toLowerCase();
+      const isGif =
+        mime === "image/gif" ||
+        mime === "video/gif" ||
+        fname.endsWith(".gif") ||
+        fname.endsWith(".gifv") ||
+        message.media.isGif;
+
+      if (isGif) {
+        mediaType = "gif";
+      } else if (mime.startsWith("image/")) {
+        mediaType = "image";
+      } else if (mime.startsWith("video/")) {
         mediaType = "video";
-      else if (message.media.fileType?.startsWith("audio/"))
+      } else if (mime.startsWith("audio/")) {
         mediaType = "audio";
-      else mediaType = "file";
+      } else {
+        mediaType = "file";
+      }
+
       if (!snippet) {
         snippet =
-          mediaType === "image"
-            ? "📷 Photo"
-            : mediaType === "video"
-              ? "🎥 Video"
-              : mediaType === "audio"
-                ? "🎵 Audio"
-                : `📎 ${message.media.fileName || "File"}`;
+          mediaType === "gif"
+            ? "🎞️ GIF"
+            : mediaType === "image"
+              ? "📷 Photo"
+              : mediaType === "video"
+                ? "🎥 Video"
+                : mediaType === "audio"
+                  ? "🎵 Audio"
+                  : `📎 ${message.media.fileName || "File"}`;
       }
     }
     onReply({
@@ -487,119 +504,124 @@ export function MessageBubble({
               ],
 
               // Leave room for the three dots so they don't cover text
-              !isDeleted && !isEditing && (isOwn || message.text || message.media) && "pr-8",
+              !isDeleted &&
+                !isEditing &&
+                (isOwn || message.text || message.media) &&
+                "pr-8",
 
               isDeleted && "opacity-60",
             )}
           >
             {/* ---------- THREE DOTS INSIDE BUBBLE (FOR ALL USERS) ---------- */}
-            {!isDeleted && !isEditing && (isOwn || message.text || message.media) && (
-              <div className="absolute right-1 top-1 z-10">
-                <button
-                  ref={dotsRef}
-                  type="button"
-                  onClick={() => (showMessageMenu ? closeMenu() : openMenu())}
-                  aria-label="Message options"
-                  aria-expanded={showMessageMenu}
-                  className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full transition-opacity duration-150",
-                    isOwn
-                      ? "text-primary-foreground/80 hover:bg-black/15 hover:text-primary-foreground"
-                      : "text-secondary-foreground/80 hover:bg-black/10 dark:hover:bg-white/10 hover:text-secondary-foreground",
-                    // visible on hover (desktop), always on touch screens
-                    "opacity-100 md:opacity-0 md:group-hover:opacity-100",
-                    "focus-visible:opacity-100",
-                    showMessageMenu &&
-                      (isOwn
-                        ? "md:opacity-100 bg-black/15"
-                        : "md:opacity-100 bg-black/10 dark:bg-white/10"),
-                  )}
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </button>
+            {!isDeleted &&
+              !isEditing &&
+              (isOwn || message.text || message.media) && (
+                <div className="absolute right-1 top-1 z-10">
+                  <button
+                    ref={dotsRef}
+                    type="button"
+                    onClick={() => (showMessageMenu ? closeMenu() : openMenu())}
+                    aria-label="Message options"
+                    aria-expanded={showMessageMenu}
+                    className={cn(
+                      "flex h-6 w-6 items-center justify-center rounded-full transition-opacity duration-150",
+                      isOwn
+                        ? "text-primary-foreground/80 hover:bg-black/15 hover:text-primary-foreground"
+                        : "text-secondary-foreground/80 hover:bg-black/10 dark:hover:bg-white/10 hover:text-secondary-foreground",
+                      // visible on hover (desktop), always on touch screens
+                      "opacity-100 md:opacity-0 md:group-hover:opacity-100",
+                      "focus-visible:opacity-100",
+                      showMessageMenu &&
+                        (isOwn
+                          ? "md:opacity-100 bg-black/15"
+                          : "md:opacity-100 bg-black/10 dark:bg-white/10"),
+                    )}
+                  >
+                    <MoreVertical className="h-4 w-4" />
+                  </button>
 
-                {showMessageMenu &&
-                  menuPos &&
-                  createPortal(
-                    <div
-                      className="fixed inset-0 z-100 max-sm:bg-black/30"
-                      onClick={closeMenu}
-                    >
+                  {showMessageMenu &&
+                    menuPos &&
+                    createPortal(
                       <div
-                        role="menu"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          top: menuPos.top,
-                          left: menuPos.left,
-                          width: MENU_W,
-                        }}
-                        className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
+                        className="fixed inset-0 z-100 max-sm:bg-black/30"
+                        onClick={closeMenu}
                       >
-                        {onReply && !isDeleted && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              closeMenu();
-                              handleReply();
-                            }}
-                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
-                          >
-                            <Reply className="h-4 w-4" />
-                            <span>Reply</span>
-                          </button>
-                        )}
+                        <div
+                          role="menu"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            top: menuPos.top,
+                            left: menuPos.left,
+                            width: MENU_W,
+                          }}
+                          className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
+                        >
+                          {onReply && !isDeleted && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                closeMenu();
+                                handleReply();
+                              }}
+                              className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                            >
+                              <Reply className="h-4 w-4" />
+                              <span>Reply</span>
+                            </button>
+                          )}
 
-                        {message.text && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              closeMenu();
-                              copyMessageText();
-                            }}
-                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
-                          >
-                            <Copy className="h-4 w-4" />
-                            <span>Copy text</span>
-                          </button>
-                        )}
+                          {message.text && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                closeMenu();
+                                copyMessageText();
+                              }}
+                              className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                            >
+                              <Copy className="h-4 w-4" />
+                              <span>Copy text</span>
+                            </button>
+                          )}
 
-                        {isOwn && editable && !message.media && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              closeMenu();
-                              startEdit();
-                            }}
-                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
-                          >
-                            <Pencil className="h-4 w-4" />
-                            <span>Edit message</span>
-                          </button>
-                        )}
+                          {isOwn && editable && !message.media && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                closeMenu();
+                                startEdit();
+                              }}
+                              className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                            >
+                              <Pencil className="h-4 w-4" />
+                              <span>Edit message</span>
+                            </button>
+                          )}
 
-                        {isOwn && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              closeMenu();
-                              handleDeleteClick();
-                            }}
-                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span>Delete message</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>,
-                    document.body,
-                  )}
-              </div>
-            )}
+                          {isOwn && (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                closeMenu();
+                                handleDeleteClick();
+                              }}
+                              className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span>Delete message</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>,
+                      document.body,
+                    )}
+                </div>
+              )}
 
             {!isOwn && !isDeleted && (
               <p className="mb-0.5 text-xs font-semibold opacity-70">
@@ -665,13 +687,19 @@ export function MessageBubble({
                           }
                         }}
                         className={cn(
-                          "mb-2 flex cursor-pointer items-start gap-2 rounded-lg p-1.5 pl-2 text-left transition hover:opacity-90 select-none",
+                          "relative mb-2 flex cursor-pointer items-start gap-2 overflow-hidden rounded-lg p-2 pl-3 text-left transition hover:opacity-90 select-none",
                           isOwn
-                            ? "bg-black/15 text-primary-foreground border-l-4 border-primary-foreground/70"
-                            : "bg-black/5 dark:bg-white/5 text-foreground border-l-4 border-primary",
+                            ? "bg-black/15 text-primary-foreground"
+                            : "bg-black/5 dark:bg-white/5 text-foreground",
                         )}
                         title="Jump to quoted message"
                       >
+                        <div
+                          className={cn(
+                            "absolute left-0 top-0 bottom-0 w-1",
+                            isOwn ? "bg-primary-foreground" : "bg-primary",
+                          )}
+                        />
                         <div className="min-w-0 flex-1">
                           <p
                             className={cn(

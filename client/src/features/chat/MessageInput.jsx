@@ -272,9 +272,9 @@ export function MessageInput({
     >
       {/* Replying banner (WhatsApp style preview card) */}
       {replyingTo && (
-        <div className="mb-2 flex items-center justify-between rounded-xl border border-primary/30 bg-muted/70 p-2 pl-3 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="relative mb-2 flex items-center justify-between overflow-hidden rounded-xl border border-border bg-secondary/80 p-2.5 pl-3.5 shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-1 self-stretch rounded-full bg-primary shrink-0" />
             <Reply className="h-4 w-4 text-primary shrink-0" />
             <div className="min-w-0 text-xs">
               <span className="font-semibold text-primary truncate block">
