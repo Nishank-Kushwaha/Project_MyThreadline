@@ -369,12 +369,17 @@ function formatMediaTime(seconds) {
 // WhatsApp-style sleek interactive Audio Player with scrubbable waveform/progress
 function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
   const audioRef = useRef(null);
+  const waveformWrapRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
+
+  // Hover seek tooltip state
+  const [hoverTime, setHoverTime] = useState(null);
+  const [hoverPercent, setHoverPercent] = useState(0);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -430,6 +435,56 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
     }
   };
 
+  const updateSeekPosition = (clientX) => {
+    if (!duration || !waveformWrapRef.current) return;
+    const rect = waveformWrapRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const percent = (x / rect.width) * 100;
+    const timeAtCursor = (percent / 100) * duration;
+    setHoverPercent(percent);
+    setHoverTime(timeAtCursor);
+    return timeAtCursor;
+  };
+
+  const handleWaveformMouseMove = (e) => {
+    updateSeekPosition(e.clientX);
+  };
+
+  const handleWaveformMouseLeave = () => {
+    if (!isSeeking) {
+      setHoverTime(null);
+    }
+  };
+
+  const handleTouchStartSeek = (e) => {
+    e.stopPropagation(); // Stop parent bubble from triggering swipe-to-reply
+    setIsSeeking(true);
+    if (e.touches?.[0]) {
+      const newTime = updateSeekPosition(e.touches[0].clientX);
+      if (newTime !== undefined && audioRef.current) {
+        audioRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+      }
+    }
+  };
+
+  const handleTouchMoveSeek = (e) => {
+    e.stopPropagation(); // Stop parent bubble from dragging / swiping
+    if (e.touches?.[0]) {
+      const newTime = updateSeekPosition(e.touches[0].clientX);
+      if (newTime !== undefined && audioRef.current) {
+        audioRef.current.currentTime = newTime;
+        setCurrentTime(newTime);
+      }
+    }
+  };
+
+  const handleTouchEndSeek = (e) => {
+    e.stopPropagation();
+    setIsSeeking(false);
+    setHoverTime(null);
+  };
+
   const toggleSpeed = () => {
     const rates = [1, 1.5, 2];
     const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
@@ -483,12 +538,37 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
         </button>
 
         {/* Waveform & Scrubber */}
-        <div className="relative flex-1 flex flex-col justify-center min-w-0 py-1">
+        <div
+          ref={waveformWrapRef}
+          onMouseMove={handleWaveformMouseMove}
+          onMouseLeave={handleWaveformMouseLeave}
+          onTouchStart={handleTouchStartSeek}
+          onTouchMove={handleTouchMoveSeek}
+          onTouchEnd={handleTouchEndSeek}
+          className="relative flex-1 flex flex-col justify-center min-w-0 py-1 touch-none"
+        >
+          {/* Floating Seek Timestamp Tooltip */}
+          {hoverTime !== null && duration > 0 && (
+            <div
+              style={{
+                left: `${hoverPercent}%`,
+              }}
+              className="absolute -top-7 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center animate-in fade-in zoom-in-90 duration-150"
+            >
+              <span className="rounded-md bg-neutral-900 border border-white/20 px-2 py-0.5 font-mono text-[10px] font-bold text-white shadow-xl whitespace-nowrap">
+                {formatMediaTime(hoverTime)}
+              </span>
+              <div className="h-1.5 w-1.5 rotate-45 bg-neutral-900 border-r border-b border-white/20 -mt-1" />
+            </div>
+          )}
+
           {/* Visual audio waveform bars */}
           <div className="flex items-center gap-[2.5px] sm:gap-0.75 h-7 w-full overflow-hidden px-0.5">
             {barHeights.map((h, i) => {
               const barPercent = (i / (barHeights.length - 1)) * 100;
               const isPassed = barPercent <= progressPercent;
+              const isHovered =
+                hoverTime !== null && barPercent <= hoverPercent;
               return (
                 <div
                   key={i}
@@ -499,9 +579,13 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
                       ? isOwn
                         ? "bg-primary dark:bg-primary"
                         : "bg-primary"
-                      : isOwn
-                        ? "bg-foreground/20 dark:bg-white/20"
-                        : "bg-foreground/20 dark:bg-white/20",
+                      : isHovered
+                        ? isOwn
+                          ? "bg-primary/50 dark:bg-primary/60"
+                          : "bg-primary/50"
+                        : isOwn
+                          ? "bg-foreground/20 dark:bg-white/20"
+                          : "bg-foreground/20 dark:bg-white/20",
                   )}
                 />
               );
@@ -518,8 +602,14 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
             onMouseDown={() => setIsSeeking(true)}
             onTouchStart={() => setIsSeeking(true)}
             onChange={handleSeek}
-            onMouseUp={() => setIsSeeking(false)}
-            onTouchEnd={() => setIsSeeking(false)}
+            onMouseUp={() => {
+              setIsSeeking(false);
+              setHoverTime(null);
+            }}
+            onTouchEnd={() => {
+              setIsSeeking(false);
+              setHoverTime(null);
+            }}
             aria-label="Seek audio"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           />
@@ -1258,7 +1348,7 @@ export function MediaAttachment({ media, isOwn }) {
       <>
         <div
           className={cn(
-            "mb-1.5 w-full max-w-70 sm:max-w-xs md:max-w-sm overflow-hidden rounded-2xl border shadow-sm transition-all",
+            "mb-1.5 w-full max-w-70 sm:max-w-xs md:max-w-sm rounded-2xl border shadow-sm transition-all",
             cardTone,
           )}
         >
