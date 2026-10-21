@@ -672,7 +672,7 @@ export function MessageBubble({
                           >
                             {message.replyTo.senderName || "Message"}
                           </p>
-                          <p className="line-clamp-2 text-xs opacity-85 break-words">
+                          <p className="line-clamp-2 text-xs opacity-85 wrap-break-word">
                             {message.replyTo.text ||
                               (message.replyTo.mediaType
                                 ? `[${message.replyTo.mediaType.toUpperCase()}]`
