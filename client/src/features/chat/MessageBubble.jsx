@@ -674,7 +674,7 @@ export function MessageBubble({
                 ) : (
                   <>
                     {/* ---------- QUOTED MESSAGE (REPLY PREVIEW) ---------- */}
-                    {message.replyTo && (
+                    {message.replyTo?.messageId && (
                       <div
                         onClick={() =>
                           scrollToQuoted(message.replyTo.messageId)

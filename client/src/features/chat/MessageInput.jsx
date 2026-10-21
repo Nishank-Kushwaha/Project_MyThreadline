@@ -114,6 +114,8 @@ export function MessageInput({
   onTyping,
   replyingTo = null,
   onCancelReply,
+  droppedFile = null,
+  onClearDroppedFile,
   isEncrypted = false,
 }) {
   const [text, setText] = useState("");
@@ -189,6 +191,38 @@ export function MessageInput({
       file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
     );
     return true;
+  };
+
+  // Accept file dropped into the ChatWindow from above
+  useEffect(() => {
+    if (droppedFile) {
+      acceptFile(droppedFile);
+      onClearDroppedFile?.();
+      textareaRef.current?.focus();
+    }
+  }, [droppedFile]);
+
+  // Handle clipboard paste (Ctrl+V / Cmd+V for screenshots and files)
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    // Look for image or file in clipboard
+    for (const item of items) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) {
+          // If it is a file/image, intercept paste and attach
+          e.preventDefault();
+          const accepted = acceptFile(file);
+          if (accepted) {
+            textareaRef.current?.focus();
+          }
+          return;
+        }
+      }
+    }
+    // If no file was found in clipboard, normal text paste proceeds naturally
   };
 
   const handleFileSelect = (e) => {
@@ -380,6 +414,7 @@ export function MessageInput({
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           rows={1}
           placeholder={
             selectedFile ? "Add a caption… (optional)" : "Type a message…"

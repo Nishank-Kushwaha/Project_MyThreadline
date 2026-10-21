@@ -127,10 +127,13 @@ const messageSchema = new Schema(
 
     // Quoted reply context (WhatsApp style)
     replyTo: {
-      messageId: { type: Schema.Types.ObjectId, ref: "Message" },
-      senderName: { type: String, default: "" },
-      text: { type: String, default: "" },
-      mediaType: { type: String, default: "" },
+      type: {
+        messageId: { type: Schema.Types.ObjectId, ref: "Message" },
+        senderName: { type: String, default: "" },
+        text: { type: String, default: "" },
+        mediaType: { type: String, default: "" },
+      },
+      default: null,
     },
   },
   { timestamps: true },

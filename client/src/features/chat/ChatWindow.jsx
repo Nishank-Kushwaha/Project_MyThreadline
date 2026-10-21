@@ -14,6 +14,7 @@ import {
   Users,
   Search,
   ChevronDown,
+  UploadCloud,
 } from "lucide-react";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
@@ -108,6 +109,11 @@ export function ChatWindow({
 
   // Quoted reply state (WhatsApp style)
   const [replyingTo, setReplyingTo] = useState(null);
+
+  // Drag-and-drop state
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [droppedFile, setDroppedFile] = useState(null);
+  const dragCounterRef = useRef(0);
 
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
@@ -528,6 +534,47 @@ export function ChatWindow({
     }
     clearTimeout(idleTimer.current);
     idleTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS);
+  };
+
+  // ---------- Drag-and-Drop Handlers ----------
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer?.types?.includes("Files")) {
+      setIsDraggingOver(true);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setIsDraggingOver(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDraggingOver(false);
+
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      // Pick first file
+      setDroppedFile(files[0]);
+    }
   };
 
   // Returns false when the message wasn't sent, so the input keeps the text.
@@ -980,7 +1027,30 @@ export function ChatWindow({
   else subtitle = formatLastSeen(room.lastSeen);
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="relative flex h-full flex-col"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Full-screen Drag & Drop Overlay */}
+      {isDraggingOver && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-background/85 p-6 backdrop-blur-md animate-in fade-in duration-150 pointer-events-none">
+          <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-primary bg-primary/10 p-10 text-center shadow-2xl">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/20 text-primary">
+              <UploadCloud className="h-8 w-8 animate-bounce" />
+            </div>
+            <h3 className="text-lg font-bold text-foreground">
+              Drop files here to send
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Images, documents, and files up to 15 MiB
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 border-b border-border p-4">
         <button
           onClick={onOpenSidebar}
@@ -1206,6 +1276,8 @@ export function ChatWindow({
         onTyping={handleTyping}
         replyingTo={replyingTo}
         onCancelReply={() => setReplyingTo(null)}
+        droppedFile={droppedFile}
+        onClearDroppedFile={() => setDroppedFile(null)}
         isEncrypted={encryption === "active" || room.encrypted}
       />
       <SafetyNumberDialog
