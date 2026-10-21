@@ -106,6 +106,9 @@ export function ChatWindow({
   const [unreadCount, setUnreadCount] = useState(0);
   const isNearBottomRef = useRef(true);
 
+  // Quoted reply state (WhatsApp style)
+  const [replyingTo, setReplyingTo] = useState(null);
+
   const bottomRef = useRef(null);
   const expireTimers = useRef({}); // per-user timers for OTHER people's indicators
   const idleTimer = useRef(null); // my own "stopped typing" timer
@@ -583,6 +586,14 @@ export function ChatWindow({
           currentUser,
           text,
           media: mediaPayload,
+          replyTo: replyingTo
+            ? {
+                messageId: replyingTo.messageId,
+                senderName: replyingTo.senderName,
+                text: replyingTo.text,
+                mediaType: replyingTo.mediaType,
+              }
+            : null,
         });
 
         return new Promise((resolve) => {
@@ -618,6 +629,7 @@ export function ChatWindow({
         return false;
       }
 
+      setReplyingTo(null);
       return true;
     } catch (err) {
       console.error("Message failed to send:", err);
@@ -1148,6 +1160,7 @@ export function ChatWindow({
                             : encryption !== "active"
                         }
                         onReact={handleReact}
+                        onReply={(replyData) => setReplyingTo(replyData)}
                         onEdit={handleEditMessage}
                         onDelete={handleDeleteMessage}
                       />
@@ -1191,6 +1204,8 @@ export function ChatWindow({
       <MessageInput
         onSend={handleSend}
         onTyping={handleTyping}
+        replyingTo={replyingTo}
+        onCancelReply={() => setReplyingTo(null)}
         isEncrypted={encryption === "active" || room.encrypted}
       />
       <SafetyNumberDialog

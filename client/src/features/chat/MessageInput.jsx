@@ -13,6 +13,7 @@ import {
   X,
   File,
   Image as ImageIcon,
+  Reply,
 } from "lucide-react";
 import { formatFileSize } from "@/lib/e2ee/media";
 
@@ -108,7 +109,13 @@ function isAllowedFile(file) {
   return dot > 0 && ALLOWED_EXTENSIONS.has(file.name.slice(dot).toLowerCase());
 }
 
-export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
+export function MessageInput({
+  onSend,
+  onTyping,
+  replyingTo = null,
+  onCancelReply,
+  isEncrypted = false,
+}) {
   const [text, setText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
@@ -130,6 +137,13 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
 
   // Re-fit on every text change (also shrinks it back after sending)
   useLayoutEffect(fit, [text, fit]);
+
+  // Focus textarea when a reply is initiated
+  useEffect(() => {
+    if (replyingTo) {
+      textareaRef.current?.focus();
+    }
+  }, [replyingTo]);
 
   // Re-fit when the box gets wider/narrower (e.g. the sidebar is dragged)
   useEffect(() => {
@@ -237,6 +251,11 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
   // Enter sends, Shift+Enter adds a new line (like WhatsApp Web).
   // On phones/tablets (touch) Enter always adds a new line; use the button.
   const handleKeyDown = (e) => {
+    if (e.key === "Escape" && replyingTo) {
+      e.preventDefault();
+      onCancelReply?.();
+      return;
+    }
     if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
     if (window.matchMedia?.("(pointer: coarse)").matches) return;
     e.preventDefault();
@@ -251,6 +270,35 @@ export function MessageInput({ onSend, onTyping, isEncrypted = false }) {
       onSubmit={handleSubmit}
       className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
+      {/* Replying banner (WhatsApp style preview card) */}
+      {replyingTo && (
+        <div className="mb-2 flex items-center justify-between rounded-xl border border-primary/30 bg-muted/70 p-2 pl-3 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-1 self-stretch rounded-full bg-primary shrink-0" />
+            <Reply className="h-4 w-4 text-primary shrink-0" />
+            <div className="min-w-0 text-xs">
+              <span className="font-semibold text-primary truncate block">
+                {replyingTo.senderName || "Message"}
+              </span>
+              <p className="truncate text-muted-foreground text-[11px]">
+                {replyingTo.text ||
+                  (replyingTo.mediaType
+                    ? `[${replyingTo.mediaType.toUpperCase()}]`
+                    : "Attachment")}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelReply}
+            aria-label="Cancel reply"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* File error message */}
       {fileError && (
         <div className="mb-2 text-xs text-destructive">{fileError}</div>

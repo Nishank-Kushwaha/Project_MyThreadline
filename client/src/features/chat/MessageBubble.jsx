@@ -11,6 +11,7 @@ import {
   MoreVertical,
   Lock,
   Copy,
+  Reply,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuickReactBar } from "./QuickReactBar";
@@ -77,6 +78,7 @@ export function MessageBubble({
   currentUserId,
   editable = true,
   onReact,
+  onReply,
   onEdit,
   onDelete,
 }) {
@@ -87,11 +89,14 @@ export function MessageBubble({
   const [showMessageMenu, setShowMessageMenu] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
   const [quickBarTop, setQuickBarTop] = useState(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
 
   const quickBarTimer = useRef(null);
   const bubbleRef = useRef(null);
   const dotsRef = useRef(null);
   const quickBarWrapRef = useRef(null);
+  const touchStartRef = useRef(null);
+  const isSwipingRef = useRef(false);
 
   const isDeleted = !!message.deletedAt;
   const undecryptable =
@@ -108,6 +113,82 @@ export function MessageBubble({
   // chat there are only two people, so the header photo already answers
   // "who am I talking to" without repeating it on every bubble.
   const showAvatar = isGroup && !isOwn;
+
+  // --------------------------------------------------
+  // SWIPE-TO-REPLY (Touch gestures for mobile)
+  // --------------------------------------------------
+  const handleTouchStart = (e) => {
+    if (isDeleted || isEditing || !onReply) return;
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+    isSwipingRef.current = false;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!touchStartRef.current) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - touchStartRef.current.x;
+    const dy = touch.clientY - touchStartRef.current.y;
+
+    // If vertical scroll is larger than horizontal swipe, ignore
+    if (!isSwipingRef.current && Math.abs(dy) > Math.abs(dx)) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    // Only allow swiping right (like WhatsApp / Telegram)
+    if (dx > 8) {
+      isSwipingRef.current = true;
+      // Damped translation for natural elastic feel (max ~70px)
+      const damped = Math.min(dx * 0.45, 70);
+      setSwipeOffset(damped);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (isSwipingRef.current && swipeOffset >= 35) {
+      // Trigger reply
+      handleReply();
+      if (navigator.vibrate) {
+        try {
+          navigator.vibrate(25);
+        } catch {}
+      }
+    }
+    touchStartRef.current = null;
+    isSwipingRef.current = false;
+    setSwipeOffset(0);
+  };
+
+  const handleReply = () => {
+    if (!onReply || isDeleted) return;
+    let snippet = message.text || "";
+    let mediaType = "";
+    if (message.media) {
+      if (message.media.fileType?.startsWith("image/")) mediaType = "image";
+      else if (message.media.fileType?.startsWith("video/"))
+        mediaType = "video";
+      else if (message.media.fileType?.startsWith("audio/"))
+        mediaType = "audio";
+      else mediaType = "file";
+      if (!snippet) {
+        snippet =
+          mediaType === "image"
+            ? "📷 Photo"
+            : mediaType === "video"
+              ? "🎥 Video"
+              : mediaType === "audio"
+                ? "🎵 Audio"
+                : `📎 ${message.media.fileName || "File"}`;
+      }
+    }
+    onReply({
+      messageId: message._id,
+      senderName: isOwn ? "You" : message.sender?.name || "User",
+      text: snippet,
+      mediaType,
+    });
+  };
 
   // --------------------------------------------------
   // QUICK BAR TIMER
@@ -311,15 +392,47 @@ export function MessageBubble({
     };
   }, []);
 
+  const scrollToQuoted = (targetId) => {
+    if (!targetId) return;
+    const el = document.getElementById(`message-${targetId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("bg-primary/20", "dark:bg-primary/30");
+      setTimeout(() => {
+        el.classList.remove("bg-primary/20", "dark:bg-primary/30");
+      }, 250);
+    }
+  };
+
   return (
     <div
       id={`message-${message._id}`}
       data-message-id={message._id}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined,
+        transition: swipeOffset ? "none" : "transform 0.2s ease-out",
+      }}
       className={cn(
         "relative mb-3 flex items-center gap-3 transition-colors duration-500",
         isOwn ? "justify-end" : "justify-start",
       )}
     >
+      {/* Swipe reply indicator on the left for touch users */}
+      {swipeOffset > 10 && (
+        <div
+          style={{
+            opacity: Math.min(swipeOffset / 35, 1),
+            transform: `scale(${Math.min(0.6 + swipeOffset / 70, 1)})`,
+          }}
+          className="absolute -left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary transition-opacity"
+        >
+          <Reply className="h-4 w-4" />
+        </div>
+      )}
+
       {showAvatar && (
         <Avatar
           src={message.sender.avatarUrl}
@@ -411,6 +524,21 @@ export function MessageBubble({
                         }}
                         className="fixed rounded-xl border border-border bg-background p-1 text-foreground shadow-xl"
                       >
+                        {onReply && !isDeleted && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              handleReply();
+                            }}
+                            className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted"
+                          >
+                            <Reply className="h-4 w-4" />
+                            <span>Reply</span>
+                          </button>
+                        )}
+
                         {message.text && (
                           <button
                             type="button"
@@ -512,6 +640,48 @@ export function MessageBubble({
                   </p>
                 ) : (
                   <>
+                    {/* ---------- QUOTED MESSAGE (REPLY PREVIEW) ---------- */}
+                    {message.replyTo && (
+                      <div
+                        onClick={() =>
+                          scrollToQuoted(message.replyTo.messageId)
+                        }
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            scrollToQuoted(message.replyTo.messageId);
+                          }
+                        }}
+                        className={cn(
+                          "mb-2 flex cursor-pointer items-start gap-2 rounded-lg p-1.5 pl-2 text-left transition hover:opacity-90 select-none",
+                          isOwn
+                            ? "bg-black/15 text-primary-foreground border-l-4 border-primary-foreground/70"
+                            : "bg-black/5 dark:bg-white/5 text-foreground border-l-4 border-primary",
+                        )}
+                        title="Jump to quoted message"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={cn(
+                              "text-[11px] font-semibold truncate",
+                              isOwn
+                                ? "text-primary-foreground"
+                                : "text-primary",
+                            )}
+                          >
+                            {message.replyTo.senderName || "Message"}
+                          </p>
+                          <p className="line-clamp-2 text-xs opacity-85 break-words">
+                            {message.replyTo.text ||
+                              (message.replyTo.mediaType
+                                ? `[${message.replyTo.mediaType.toUpperCase()}]`
+                                : "Attachment")}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
                     {message.media && (
                       <MediaAttachment media={message.media} isOwn={isOwn} />
                     )}
@@ -541,7 +711,7 @@ export function MessageBubble({
             )}
           </div>
 
-          {/* ---------- EMOJI BUTTON (unchanged position) ---------- */}
+          {/* ---------- EMOJI BUTTON ---------- */}
           {!isDeleted && !isEditing && (
             <div ref={quickBarWrapRef} className="relative shrink-0">
               <button

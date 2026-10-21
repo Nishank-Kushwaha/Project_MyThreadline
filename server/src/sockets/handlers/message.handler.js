@@ -39,7 +39,7 @@ function emitToMembers(io, room, event, buildPayload) {
 function registerMessageHandlers(io, socket) {
   // Fired when a user sends a message. The server saves it, updates the room's
   // lastMessage, and broadcasts it to everyone in the room (including the sender).
-  socket.on("message:send", async ({ roomId, text, media, e2ee }, callback) => {
+  socket.on("message:send", async ({ roomId, text, media, e2ee, replyTo }, callback) => {
     try {
       const room = await Room.findOne({
         _id: roomId,
@@ -101,6 +101,14 @@ function registerMessageHandlers(io, socket) {
         sender: socket.userId,
         encrypted: Boolean(envelope),
         text: envelope ? "" : (text?.trim() || ""),
+        ...(replyTo && {
+          replyTo: {
+            messageId: replyTo.messageId,
+            senderName: replyTo.senderName || "",
+            text: replyTo.text || "",
+            mediaType: replyTo.mediaType || "",
+          },
+        }),
         ...(media && !envelope && {
           media: {
             url: media.url,

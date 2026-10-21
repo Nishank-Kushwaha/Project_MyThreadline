@@ -124,6 +124,14 @@ const messageSchema = new Schema(
       type: Date,
       default: null,
     },
+
+    // Quoted reply context (WhatsApp style)
+    replyTo: {
+      messageId: { type: Schema.Types.ObjectId, ref: "Message" },
+      senderName: { type: String, default: "" },
+      text: { type: String, default: "" },
+      mediaType: { type: String, default: "" },
+    },
   },
   { timestamps: true },
 );

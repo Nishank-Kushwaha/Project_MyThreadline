@@ -19,6 +19,7 @@ export async function buildOutgoingMessage({
   currentUser,
   text = "",
   media = null,
+  replyTo = null,
   secret,
 }) {
   if (text && text.length > MAX_TEXT_LENGTH) {
@@ -38,7 +39,7 @@ export async function buildOutgoingMessage({
 
   // Not everyone can read encrypted messages yet and the chat isn't locked in.
   if (!hasAllKeys(info) && !mustEncrypt) {
-    return { text: text || "", ...(media && { media }) };
+    return { text: text || "", ...(media && { media }), ...(replyTo && { replyTo }) };
   }
 
   // A private chat with a device-less person has nobody who could read it.
@@ -53,6 +54,7 @@ export async function buildOutgoingMessage({
     payload: {
       text: text || "",
       ...(media && { media }),
+      ...(replyTo && { replyTo }),
       secret: secret ?? generateMessageSecret(),
     },
     sender: {
@@ -64,7 +66,7 @@ export async function buildOutgoingMessage({
     recipients: info.devices,
   });
 
-  return { e2ee: envelope };
+  return { e2ee: envelope, ...(replyTo && { replyTo }) };
 }
 
 // Plaintext and system messages come back unchanged. Encrypted ones come back
@@ -89,6 +91,7 @@ export async function decryptMessage(message, { roomId, userId }) {
       ...message,
       text: payload.text || "",
       media: payload.media || null,
+      replyTo: payload.replyTo || message.replyTo || null,
       secret,
       reactions: await decryptReactions(message.reactions, {
         secret,
