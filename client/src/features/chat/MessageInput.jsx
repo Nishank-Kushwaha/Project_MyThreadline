@@ -6,20 +6,13 @@ import React, {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Loader2,
-  Paperclip,
-  Send,
-  X,
-  File,
-  Image as ImageIcon,
-  Reply,
-} from "lucide-react";
+import { Loader2, Paperclip, Send, X, File, Reply, Mic } from "lucide-react";
 import { formatFileSize } from "@/lib/e2ee/media";
 
 import { GifPickerButton } from "./GifPickerButton";
 import { gifToFile } from "./gifToFile";
 import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
+import { VoiceRecorder } from "./VoiceRecorder";
 import { toast } from "sonner";
 
 // 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
@@ -124,6 +117,7 @@ export function MessageInput({
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const [isSending, setIsSending] = useState(false);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [fileError, setFileError] = useState("");
   const [gifLoading, setGifLoading] = useState(false);
   const [dismissedUrl, setDismissedUrl] = useState(null);
@@ -280,6 +274,22 @@ export function MessageInput({
     send();
   };
 
+  const cancelVoice = useCallback(() => setIsVoiceRecording(false), []);
+
+  const handleSendVoice = async (file) => {
+    setIsSending(true);
+    setFileError("");
+    try {
+      const sent = await onSend("", file);
+      if (sent !== false) setIsVoiceRecording(false);
+    } catch (err) {
+      console.error("Voice send failed:", err);
+      toast.error("Couldn't send the voice message. Please try again.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const handleGifSelect = async (gif) => {
     setGifLoading(true);
     setFileError("");
@@ -414,61 +424,85 @@ export function MessageInput({
         </div>
       )}
 
-      <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
-        {/* Hidden File Input */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileSelect}
-          className="hidden"
-          accept={ACCEPT_ATTRIBUTE}
+      {isVoiceRecording ? (
+        <VoiceRecorder
+          onSendVoice={handleSendVoice}
+          onCancel={cancelVoice}
+          isSending={isSending}
         />
+      ) : (
+        <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
+          {/* Hidden File Input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            className="hidden"
+            accept={ACCEPT_ATTRIBUTE}
+          />
 
-        {/* Attachment Button */}
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isSending}
-          aria-label="Attach file"
-          title="Attach file or photo"
-          className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-        >
-          <Paperclip className="h-4 w-4" />
-        </button>
+          {/* Attachment Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isSending}
+            aria-label="Attach file"
+            title="Attach file or photo"
+            className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
 
-        <GifPickerButton
-          onSelect={handleGifSelect}
-          disabled={isSending || gifLoading}
-        />
+          <GifPickerButton
+            onSelect={handleGifSelect}
+            disabled={isSending || gifLoading}
+          />
 
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          rows={1}
-          placeholder={
-            selectedFile ? "Add a caption… (optional)" : "Type a message…"
-          }
-          aria-label="Message"
-          autoComplete="off"
-          className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"
-        />
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            rows={1}
+            placeholder={
+              selectedFile ? "Add a caption… (optional)" : "Type a message…"
+            }
+            aria-label="Message"
+            autoComplete="off"
+            className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"
+          />
 
-        <Button
-          type="submit"
-          disabled={!canSend}
-          aria-label="Send message"
-          className="h-10 w-10 shrink-0 rounded-full p-0"
-        >
-          {isSending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
+          {canSend ? (
+            <Button
+              type="submit"
+              disabled={!canSend}
+              aria-label="Send message"
+              className="h-10 w-10 shrink-0 rounded-full p-0"
+            >
+              {isSending ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
           ) : (
-            <Send className="h-5 w-5" />
+            <button
+              type="button"
+              onClick={() => {
+                setIsVoiceRecording(true);
+                onTyping?.();
+              }}
+              disabled={isSending}
+              aria-label="Record voice note"
+              title="Record voice message"
+              className="h-10 w-10 shrink-0 flex items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-50"
+            >
+              <Mic className="h-5 w-5" />
+            </button>
           )}
-        </Button>
-      </div>
+        </div>
+      )}
     </form>
   );
 }

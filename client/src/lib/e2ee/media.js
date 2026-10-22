@@ -94,7 +94,17 @@ export async function decryptMedia({ url, key, iv, fileType, fileName }) {
     let mime = fileType;
     const lowerName = (fileName || "").toLowerCase();
     if (!mime || mime === "application/octet-stream") {
-      if (lowerName.endsWith(".pdf")) mime = "application/pdf";
+      if (lowerName.endsWith(".wav")) mime = "audio/wav";
+      else if (lowerName.endsWith(".mp3")) mime = "audio/mpeg";
+      else if (lowerName.endsWith(".ogg") || lowerName.endsWith(".oga") || lowerName.endsWith(".opus"))
+        mime = "audio/ogg";
+      else if (lowerName.endsWith(".m4a") || lowerName.endsWith(".aac"))
+        mime = "audio/mp4";
+      else if (lowerName.endsWith(".webm") || lowerName.endsWith(".weba"))
+        mime = "audio/webm";
+      else if (lowerName.endsWith(".mp4") || lowerName.endsWith(".m4v"))
+        mime = "video/mp4";
+      else if (lowerName.endsWith(".pdf")) mime = "application/pdf";
       else if (lowerName.endsWith(".png")) mime = "image/png";
       else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg"))
         mime = "image/jpeg";

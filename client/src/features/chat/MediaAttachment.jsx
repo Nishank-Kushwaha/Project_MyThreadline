@@ -3,7 +3,6 @@ import React, {
   useMemo,
   useState,
   useRef,
-  useCallback,
   lazy,
   Suspense,
 } from "react";
@@ -26,7 +25,7 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
-  RotateCcw,
+  Mic,
 } from "lucide-react";
 import { decryptMedia, formatFileSize } from "@/lib/e2ee/media";
 import { cn } from "@/lib/utils";
@@ -370,15 +369,29 @@ function formatMediaTime(seconds) {
 }
 
 // WhatsApp-style sleek interactive Audio Player with scrubbable waveform/progress
-function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
+function CustomAudioPlayer({
+  src,
+  isOwn,
+  isVoiceNote = false,
+  fallbackDuration = 0,
+  downloadName,
+  onError,
+}) {
   const audioRef = useRef(null);
   const waveformWrapRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(fallbackDuration || 0);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
+
+  // Sync fallbackDuration if duration was 0 or unmeasured
+  useEffect(() => {
+    if (fallbackDuration && (!duration || !isFinite(duration))) {
+      setDuration(fallbackDuration);
+    }
+  }, [fallbackDuration]);
 
   // Hover seek tooltip state
   const [hoverTime, setHoverTime] = useState(null);
@@ -388,11 +401,22 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
     const audio = audioRef.current;
     if (!audio) return;
 
+    let fixing = false;
     const handleLoadedMetadata = () => {
-      if (audio.duration && isFinite(audio.duration)) {
+      if (audio.duration === Infinity && !fixing) {
+        fixing = true;
+        const reset = () => {
+          audio.removeEventListener("timeupdate", reset);
+          audio.currentTime = 0;
+          fixing = false;
+        };
+        audio.addEventListener("timeupdate", reset);
+        audio.currentTime = 1e101;
+      } else if (audio.duration && isFinite(audio.duration)) {
         setDuration(audio.duration);
       }
     };
+
     const handleTimeUpdate = () => {
       if (!isSeeking) setCurrentTime(audio.currentTime);
     };
@@ -403,19 +427,21 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
       setCurrentTime(0);
     };
 
-    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
     audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
     audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("loadedmetadata", handleLoadedMetadata);
+    audio.addEventListener("durationchange", handleLoadedMetadata);
     if (onError) audio.addEventListener("error", onError);
 
     return () => {
-      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
       audio.removeEventListener("timeupdate", handleTimeUpdate);
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      audio.removeEventListener("durationchange", handleLoadedMetadata);
       if (onError) audio.removeEventListener("error", onError);
     };
   }, [isSeeking, onError]);
@@ -527,7 +553,7 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
           onClick={togglePlay}
           aria-label={isPlaying ? "Pause audio" : "Play audio"}
           className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-md transition-all active:scale-95",
+            "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full shadow-md transition-all active:scale-95",
             isOwn
               ? "bg-primary text-primary-foreground hover:brightness-110"
               : "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -537,6 +563,15 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
             <Pause className="h-5 w-5 fill-current" />
           ) : (
             <Play className="h-5 w-5 fill-current ml-0.5" />
+          )}
+
+          {isVoiceNote && (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-background border border-border text-primary shadow-xs"
+              title="Voice message"
+            >
+              <Mic className="h-2.5 w-2.5" />
+            </span>
           )}
         </button>
 
@@ -646,6 +681,16 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
                   <Volume2 className="h-3.5 w-3.5" />
                 )}
               </button>
+              {isVoiceNote && src && (
+                <DownloadLink
+                  href={src}
+                  fileName={downloadName || "voice-message.weba"}
+                  className="opacity-70 hover:opacity-100 transition p-0.5 text-foreground hover:text-primary"
+                  title="Download voice note"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </DownloadLink>
+              )}
             </div>
           </div>
         </div>
@@ -655,13 +700,7 @@ function CustomAudioPlayer({ src, fileName, metaLine, isOwn, onError }) {
 }
 
 // WhatsApp-style modern Video Card with overlay controls and thumbnail view
-function CustomVideoPlayer({
-  src,
-  fileName,
-  isOwn,
-  onOpenFullscreen,
-  onError,
-}) {
+function CustomVideoPlayer({ src, onOpenFullscreen, onError }) {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -868,14 +907,30 @@ export function MediaAttachment({ media, isOwn }) {
     : EXTENSION_MEDIA_MIME[info.ext];
   const canPlay = useMemo(
     () =>
-      (info.kind === "audio" || info.kind === "video") &&
-      canBrowserPlay(info.kind, playMime),
+      info.kind === "audio" ||
+      (info.kind === "video" && canBrowserPlay(info.kind, playMime)),
     [info.kind, playMime],
   );
 
   const isGifImage =
     info.kind === "image" && (info.mime === "image/gif" || info.ext === "gif");
   const isGifClip = info.kind === "video" && isGifVideo(media, info.kind);
+
+  const isVoiceNote =
+    info.kind === "audio" &&
+    (String(media?.fileName || "")
+      .toLowerCase()
+      .includes("voice-message") ||
+      String(media?.fileName || "")
+        .toLowerCase()
+        .includes("voice-note") ||
+      Boolean(media?.isVoiceNote));
+
+  const parsedDuration = useMemo(() => {
+    if (media?.duration && isFinite(media.duration)) return media.duration;
+    const match = String(media?.fileName || "").match(/_dur(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
+  }, [media?.duration, media?.fileName]);
 
   // Which presentation to use: gifimage | image | pdf | gif | media | generic
   let view = "generic";
@@ -1346,7 +1401,10 @@ export function MediaAttachment({ media, isOwn }) {
   // below via previewBroken.
   // ══════════════════════════════════════════════════════════════════════════
   if (view === "media") {
-    const onPlayerError = () => setPreviewBroken(true);
+    const onPlayerError = (e) => {
+      console.warn("Media player failed to play:", e);
+      setPreviewBroken(true);
+    };
     return (
       <>
         <div
@@ -1370,59 +1428,60 @@ export function MediaAttachment({ media, isOwn }) {
             (info.kind === "video" ? (
               <CustomVideoPlayer
                 src={sourceUrl}
-                fileName={displayName}
-                isOwn={isOwn}
                 onOpenFullscreen={() => setIsModalOpen(true)}
                 onError={onPlayerError}
               />
             ) : (
               <CustomAudioPlayer
                 src={sourceUrl}
-                fileName={displayName}
-                metaLine={metaLine}
                 isOwn={isOwn}
+                isVoiceNote={isVoiceNote}
+                fallbackDuration={parsedDuration}
+                downloadName={downloadName}
                 onError={onPlayerError}
               />
             ))
           )}
 
-          {/* Bottom metadata and download row */}
-          <div className="flex items-center justify-between gap-2.5 border-t border-black/5 dark:border-white/10 px-3 py-2 bg-black/2 dark:bg-white/2">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <div
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                  info.kind === "video"
-                    ? "bg-purple-500/10 text-purple-600 dark:text-purple-400"
-                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                )}
-              >
-                {info.kind === "video" ? (
-                  <FileVideo className="h-3.5 w-3.5" />
-                ) : (
-                  <FileAudio className="h-3.5 w-3.5" />
-                )}
+          {/* Bottom metadata and download row (hidden for voice notes) */}
+          {!isVoiceNote && (
+            <div className="flex items-center justify-between gap-2.5 border-t border-black/5 dark:border-white/10 px-3 py-2 bg-black/2 dark:bg-white/2">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                    info.kind === "video"
+                      ? "bg-purple-500/10 text-purple-600 dark:text-purple-400"
+                      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                  )}
+                >
+                  {info.kind === "video" ? (
+                    <FileVideo className="h-3.5 w-3.5" />
+                  ) : (
+                    <FileAudio className="h-3.5 w-3.5" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold leading-tight text-foreground">
+                    {displayName}
+                  </p>
+                  <p className="truncate text-[10px] leading-tight text-muted-foreground">
+                    {metaLine}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-semibold leading-tight text-foreground">
-                  {displayName}
-                </p>
-                <p className="truncate text-[10px] leading-tight text-muted-foreground">
-                  {metaLine}
-                </p>
-              </div>
-            </div>
 
-            {sourceUrl && !isLoading && !displayError && (
-              <DownloadLink
-                href={sourceUrl}
-                fileName={downloadName}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:scale-105 hover:bg-muted active:scale-95"
-              >
-                <Download className="h-3.5 w-3.5" />
-              </DownloadLink>
-            )}
-          </div>
+              {sourceUrl && !isLoading && !displayError && (
+                <DownloadLink
+                  href={sourceUrl}
+                  fileName={downloadName}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:scale-105 hover:bg-muted active:scale-95"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </DownloadLink>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Video Fullscreen Preview Modal */}
