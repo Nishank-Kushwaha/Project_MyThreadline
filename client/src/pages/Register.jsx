@@ -13,6 +13,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { DriftingBubbles } from "@/components/magicui/drifting-bubbles";
+import { toast } from "sonner";
 import { getSystemTheme } from "@/lib/themes";
 
 export default function Register() {
@@ -31,12 +32,14 @@ export default function Register() {
     setIsSubmitting(true);
     try {
       await register({ ...form, theme: getSystemTheme() });
+      toast.success("Account created successfully!");
       navigate("/");
     } catch (err) {
-      setError(
+      const errorMsg =
         err.response?.data?.message ||
-          "Couldn't create your account. Please try again.",
-      );
+        "Couldn't create your account. Please try again.";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsSubmitting(false);
     }

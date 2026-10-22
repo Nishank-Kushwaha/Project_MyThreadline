@@ -46,6 +46,7 @@ import {
 } from "@/lib/e2ee/messageStore";
 import { encryptMedia } from "@/lib/e2ee/media";
 import { uploadMediaRequest } from "@/api/mediaApi";
+import { toast } from "sonner";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence
 const TYPING_REFRESH_MS = 2500; // while I keep typing, re-announce this often
@@ -680,7 +681,9 @@ export function ChatWindow({
       }
 
       if (!ack?.success) {
-        setSendError(ack?.message || "Message failed to send.");
+        const errorMsg = ack?.message || "Message failed to send.";
+        setSendError(errorMsg);
+        toast.error(errorMsg);
         return false;
       }
 
@@ -688,7 +691,9 @@ export function ChatWindow({
       return true;
     } catch (err) {
       console.error("Message failed to send:", err);
-      setSendError(err.message || "Couldn't send that message.");
+      const errorMsg = err.message || "Couldn't send that message.";
+      setSendError(errorMsg);
+      toast.error(errorMsg);
       return false;
     }
   };
@@ -723,10 +728,14 @@ export function ChatWindow({
       });
 
       if (!ack?.success) {
-        setSendError(ack?.message || "Couldn't save that reaction.");
+        const errorMsg = ack?.message || "Couldn't save that reaction.";
+        setSendError(errorMsg);
+        toast.error(errorMsg);
       }
     } catch (err) {
-      setSendError(err.message || "Couldn't save that reaction.");
+      const errorMsg = err.message || "Couldn't save that reaction.";
+      setSendError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -764,9 +773,13 @@ export function ChatWindow({
           );
       });
 
-      if (!ack?.success) alert(ack?.message || "Couldn't edit that message.");
+      if (!ack?.success) {
+        toast.error(ack?.message || "Couldn't edit that message.");
+      } else {
+        toast.success("Message edited");
+      }
     } catch (err) {
-      alert(err.message || "Couldn't edit that message.");
+      toast.error(err.message || "Couldn't edit that message.");
     }
   };
 
@@ -778,7 +791,11 @@ export function ChatWindow({
       "message:delete",
       { roomId: room.id, messageId, mediaPublicId: targetPublicId },
       (ack) => {
-        if (!ack?.success) alert(ack?.message || "Couldn't delete that message.");
+        if (!ack?.success) {
+          toast.error(ack?.message || "Couldn't delete that message.");
+        } else {
+          toast.success("Message deleted");
+        }
       },
     );
   };

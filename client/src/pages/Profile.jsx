@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
+import { toast } from "sonner";
 import {
   X,
   Sparkles,
@@ -89,12 +90,16 @@ function ProfileSidebar() {
       const { data } = await uploadAvatarRequest(file);
       updateUser(data.user);
       setAvatarStatus({ error: "", loading: false, action: null });
+      toast.success("Profile photo updated");
     } catch (err) {
+      const errorMsg =
+        err.response?.data?.message || "Couldn't upload that image.";
       setAvatarStatus({
-        error: err.response?.data?.message || "Couldn't upload that image.",
+        error: errorMsg,
         loading: false,
         action: null,
       });
+      toast.error(errorMsg);
     } finally {
       setAvatarPreview(null);
       URL.revokeObjectURL(objectUrl);
@@ -123,12 +128,16 @@ function ProfileSidebar() {
       updateUser(data.user);
       setShowAvatarDialog(false);
       setAvatarStatus({ error: "", loading: false, action: null });
+      toast.success("Profile photo removed");
     } catch (err) {
+      const errorMsg =
+        err.response?.data?.message || "Couldn't remove your photo.";
       setAvatarStatus({
-        error: err.response?.data?.message || "Couldn't remove your photo.",
+        error: errorMsg,
         loading: false,
         action: null,
       });
+      toast.error(errorMsg);
     }
   };
 
@@ -148,13 +157,16 @@ function ProfileSidebar() {
       const { data } = await updateNotificationSettingsRequest(next);
       updateUser(data.user);
       setNotificationStatus({ error: "", loading: false });
+      toast.success("Notification preferences saved");
     } catch (err) {
+      const errorMsg =
+        err.response?.data?.message || "Couldn't save notification settings.";
       updateUser({ notificationSettings: previous }); // put it back
       setNotificationStatus({
-        error:
-          err.response?.data?.message || "Couldn't save notification settings.",
+        error: errorMsg,
         loading: false,
       });
+      toast.error(errorMsg);
     }
   };
 
@@ -401,12 +413,16 @@ function ProfileInfoCard() {
       updateUser(data.user);
       setName(trimmed);
       setStatus({ error: "", success: "Saved.", loading: false });
+      toast.success("Name updated successfully");
     } catch (err) {
+      const errorMsg =
+        err.response?.data?.message || "Couldn't save your name.";
       setStatus({
-        error: err.response?.data?.message || "Couldn't save your name.",
+        error: errorMsg,
         success: "",
         loading: false,
       });
+      toast.error(errorMsg);
     }
   };
 
@@ -558,12 +574,16 @@ function PasswordCard() {
       setForm({ currentPassword: "", newPassword: "" });
       setShow({ current: false, next: false });
       setStatus({ error: "", success: "Password updated.", loading: false });
+      toast.success("Password updated successfully");
     } catch (err) {
+      const errorMsg =
+        err.response?.data?.message || "Couldn't update your password.";
       setStatus({
-        error: err.response?.data?.message || "Couldn't update your password.",
+        error: errorMsg,
         success: "",
         loading: false,
       });
+      toast.error(errorMsg);
     }
   };
 

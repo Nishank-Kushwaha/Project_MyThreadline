@@ -47,6 +47,7 @@ import { listUsersRequest } from "@/api/usersApi";
 
 import { useRoomVerification } from "@/features/e2ee/useVerification";
 import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
+import { toast } from "sonner";
 
 // Lazy-loaded so the DiceBear collection stays out of the main bundle.
 const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
@@ -216,11 +217,14 @@ export function MembersPanel({
       applyRoomUpdate(data.room);
       setNameStatus({ loading: false, error: "" });
       setIsEditingName(false);
+      toast.success("Group renamed successfully");
     } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't rename the group.");
       setNameStatus({
         loading: false,
-        error: apiMessage(err, "Couldn't rename the group."),
+        error: errorMsg,
       });
+      toast.error(errorMsg);
     }
   };
 
@@ -234,9 +238,11 @@ export function MembersPanel({
       const { data } = await updateGroupAvatarRequest(room.id, file);
       applyRoomUpdate(data.room);
       setPhotoStatus({ loading: false, action: null, error: "" });
+      toast.success("Group photo updated");
     } catch (err) {
       const message = apiMessage(err, "Couldn't upload that image.");
       setPhotoStatus({ loading: false, action: null, error: message });
+      toast.error(message);
       throw new Error(message);
     } finally {
       setAvatarPreview(null);
@@ -264,12 +270,15 @@ export function MembersPanel({
       applyRoomUpdate(data.room);
       setShowPhoto(false);
       setPhotoStatus({ loading: false, action: null, error: "" });
+      toast.success("Group photo removed");
     } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't remove the group photo.");
       setPhotoStatus({
         loading: false,
         action: null,
-        error: apiMessage(err, "Couldn't remove the group photo."),
+        error: errorMsg,
       });
+      toast.error(errorMsg);
     }
   };
 
@@ -278,8 +287,11 @@ export function MembersPanel({
     try {
       const { data } = await removeRoomMemberRequest(room.id, member.id);
       setMembers(data.members);
+      toast.success(`${member.name} removed from group`);
     } catch (err) {
-      setError(apiMessage(err, "Couldn't remove that person."));
+      const errorMsg = apiMessage(err, "Couldn't remove that person.");
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -288,8 +300,11 @@ export function MembersPanel({
     try {
       const { data } = await makeRoomAdminRequest(room.id, member.id);
       setMembers(data.members);
+      toast.success(`${member.name} is now an admin`);
     } catch (err) {
-      setError(apiMessage(err, "Couldn't make that person an admin."));
+      const errorMsg = apiMessage(err, "Couldn't make that person an admin.");
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -298,8 +313,11 @@ export function MembersPanel({
     try {
       const { data } = await demoteRoomAdminRequest(room.id, member.id);
       setMembers(data.members);
+      toast.success(`${member.name} dismissed as admin`);
     } catch (err) {
-      setError(apiMessage(err, "Couldn't dismiss that person as admin."));
+      const errorMsg = apiMessage(err, "Couldn't dismiss that person as admin.");
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -308,8 +326,11 @@ export function MembersPanel({
     try {
       const { data } = await transferCreatorRequest(room.id, member.id);
       setMembers(data.members);
+      toast.success(`Transferred creator role to ${member.name}`);
     } catch (err) {
-      setError(apiMessage(err, "Couldn't transfer the creator role."));
+      const errorMsg = apiMessage(err, "Couldn't transfer the creator role.");
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -317,10 +338,13 @@ export function MembersPanel({
     setError("");
     try {
       await leaveRoomRequest(room.id);
+      toast.success("You left the group");
       // Nothing else to do here: the server emits "room:removed" to this user
       // and the Dashboard removes the room and closes this panel.
     } catch (err) {
-      setError(apiMessage(err, "Couldn't leave the group."));
+      const errorMsg = apiMessage(err, "Couldn't leave the group.");
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -964,8 +988,11 @@ function AddMemberPopup({
     try {
       const { data } = await addRoomMemberRequest(roomId, userId);
       onAdded(data.members);
+      toast.success("Member added to group");
     } catch (err) {
-      setError(apiMessage(err, "Couldn't add that person."));
+      const errorMsg = apiMessage(err, "Couldn't add that person.");
+      setError(errorMsg);
+      toast.error(errorMsg);
       setAddingId(null);
     }
   };

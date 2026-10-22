@@ -12,6 +12,7 @@ import {
 } from "@/lib/e2ee/safety";
 import { removeVerification, saveVerification } from "@/lib/e2ee/verification";
 import { fingerprintOf } from "@/lib/e2ee/deviceKey";
+import { toast } from "sonner";
 
 const signatureOf = (devices) =>
   devices
@@ -145,19 +146,22 @@ export function SafetyNumberDialog({ open, onOpenChange, me, contact }) {
     try {
       await navigator.clipboard.writeText(formatSafetyNumber(digits));
       setCopied(true);
+      toast.success("Security number copied to clipboard");
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // clipboard blocked: the number is on screen anyway
+      toast.error("Failed to copy security number");
     }
   };
 
   const markVerified = () => {
     saveVerification(me.id, contact.userId, contact.devices);
+    toast.success(`${contact.name || "Contact"} marked as verified`);
     onOpenChange(false);
   };
 
   const unverify = () => {
     removeVerification(me.id, contact.userId);
+    toast.info(`Verification cleared for ${contact.name || "contact"}`);
     onOpenChange(false);
   };
 

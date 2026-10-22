@@ -7,6 +7,7 @@ import { listUsersRequest } from "@/api/usersApi";
 import { createRoomRequest } from "@/api/roomsApi";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
+import { toast } from "sonner";
 
 export function NewChatDialog({ open, onOpenChange, onCreated }) {
   const [users, setUsers] = useState([]);
@@ -51,9 +52,13 @@ export function NewChatDialog({ open, onOpenChange, onCreated }) {
           ? { type: "private", memberId: selectedIds[0] }
           : { type: "group", name: groupName, memberIds: selectedIds };
       const { data } = await createRoomRequest(payload);
+      toast.success(mode === "private" ? "Chat created" : "Group created");
       onCreated(data.room);
     } catch (err) {
-      setError(err.response?.data?.message || "Couldn't start that chat.");
+      const errorMsg =
+        err.response?.data?.message || "Couldn't start that chat.";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsSubmitting(false);
     }

@@ -18,6 +18,7 @@ import {
 } from "@/features/chat/useChatNotifications";
 import { useE2EE } from "@/features/e2ee/E2EEContext";
 import { decryptPreview } from "@/lib/e2ee/messages";
+import { toast } from "sonner";
 
 // Sidebar width limits for md+ screens (like WhatsApp Web)
 const SIDEBAR_MIN = 280;
@@ -545,7 +546,14 @@ export default function Dashboard() {
           <Button
             variant="ghost"
             className="w-full hover:bg-rose-800"
-            onClick={logout}
+            onClick={async () => {
+              try {
+                await logout();
+                toast.success("Signed out");
+              } catch {
+                toast.error("Error signing out");
+              }
+            }}
           >
             Sign out
           </Button>

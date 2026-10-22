@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { decryptMedia, formatFileSize } from "@/lib/e2ee/media";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 // Lazy-load PdfViewer so pdfjs-dist is NOT bundled in the initial chunk
 const PdfViewer = lazy(() =>
@@ -328,8 +329,10 @@ function DownloadLink({
     if (busy) return;
     setBusy(true);
     try {
+      toast.info(`Downloading ${fileName}…`, { duration: 2000 });
       await saveRemoteFile(href, fileName);
     } catch {
+      toast.info(`Opening ${fileName} in new tab…`, { duration: 2500 });
       window.open(href, "_blank", "noopener,noreferrer");
     } finally {
       setBusy(false);

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { useE2EE } from "@/features/e2ee/E2EEContext";
 import {
@@ -92,11 +93,14 @@ export function BackupSettings({ className }) {
       const result = await task();
       resetForm();
       await load();
-      setNotice(successMessage(result));
+      const msg = successMessage(result);
+      setNotice(msg);
+      toast.success(msg);
     } catch (err) {
-      setError(
-        err.response?.data?.message || err.message || "Something went wrong.",
-      );
+      const errText =
+        err.response?.data?.message || err.message || "Something went wrong.";
+      setError(errText);
+      toast.error(errText);
     } finally {
       setBusy(false);
     }
@@ -287,7 +291,14 @@ export function BackupSettings({ className }) {
                 {passphrase && (
                   <button
                     type="button"
-                    onClick={() => navigator.clipboard?.writeText(passphrase)}
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard?.writeText(passphrase);
+                        toast.success("Passphrase copied to clipboard");
+                      } catch {
+                        toast.error("Failed to copy passphrase");
+                      }
+                    }}
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                   >
                     <Copy className="h-3.5 w-3.5" /> Copy

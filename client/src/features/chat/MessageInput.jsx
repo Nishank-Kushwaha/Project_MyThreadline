@@ -20,6 +20,7 @@ import { formatFileSize } from "@/lib/e2ee/media";
 import { GifPickerButton } from "./GifPickerButton";
 import { gifToFile } from "./gifToFile";
 import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
+import { toast } from "sonner";
 
 // 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
@@ -179,14 +180,17 @@ export function MessageInput({
     setFileError("");
     if (file.size === 0) {
       setFileError("This file is empty.");
+      toast.error("This file is empty.");
       return false;
     }
     if (file.size > MAX_FILE_SIZE_BYTES) {
       setFileError("File exceeds the 15 MiB limit.");
+      toast.error("File exceeds the 15 MiB limit.");
       return false;
     }
     if (!isAllowedFile(file)) {
       setFileError("This file type isn't supported.");
+      toast.error("This file type isn't supported.");
       return false;
     }
 
@@ -282,7 +286,9 @@ export function MessageInput({
     try {
       acceptFile(await gifToFile(gif));
     } catch {
-      setFileError("Couldn't load that GIF. Please try another.");
+      const errText = "Couldn't load that GIF. Please try another.";
+      setFileError(errText);
+      toast.error(errText);
     } finally {
       setGifLoading(false);
     }

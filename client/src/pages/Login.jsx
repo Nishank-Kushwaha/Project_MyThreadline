@@ -13,6 +13,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { DriftingBubbles } from "@/components/magicui/drifting-bubbles";
+import { toast } from "sonner";
 
 export default function Login() {
   const { login } = useAuth();
@@ -27,7 +28,9 @@ export default function Login() {
 
   useEffect(() => {
     if (googleError) {
-      setError("Failed to sign in with Google. Please try again.");
+      const errText = "Failed to sign in with Google. Please try again.";
+      setError(errText);
+      toast.error(errText);
     }
   }, [googleError]);
 
@@ -40,12 +43,14 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       await login(form);
+      toast.success("Welcome back!");
       navigate("/");
     } catch (err) {
-      setError(
+      const errorMsg =
         err.response?.data?.message ||
-          "Couldn't sign you in. Check your details and try again.",
-      );
+        "Couldn't sign you in. Check your details and try again.";
+      setError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsSubmitting(false);
     }
