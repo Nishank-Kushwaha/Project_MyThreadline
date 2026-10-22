@@ -34,6 +34,8 @@ const EmojiPickerPopover = lazy(() =>
 );
 
 const QUICK_BAR_DURATION = 3000;
+// Matches WhatsApp's 15-minute edit window (matching server EDIT_WINDOW_MS)
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 // Message options menu size (w-44 = 176px; three rows + padding ≈ 124px)
 const MENU_W = 176;
@@ -118,6 +120,13 @@ export function MessageBubble({
   // chat there are only two people, so the header photo already answers
   // "who am I talking to" without repeating it on every bubble.
   const showAvatar = isGroup && !isOwn;
+
+  // WhatsApp-style: only allow editing own text messages sent within the 15-minute window
+  const isWithinEditWindow =
+    Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
+  const canEdit = Boolean(
+    isOwn && editable && !message.media && isWithinEditWindow,
+  );
 
   // --------------------------------------------------
   // SWIPE-TO-REPLY (Touch gestures for mobile)
@@ -278,6 +287,7 @@ export function MessageBubble({
   // --------------------------------------------------
 
   const startEdit = () => {
+    if (!canEdit) return;
     setEditText(message.text);
     setIsEditing(true);
   };
@@ -357,7 +367,7 @@ export function MessageBubble({
 
     const hasCopy = Boolean(message.text);
     const hasReply = Boolean(onReply && !isDeleted);
-    const hasEdit = Boolean(isOwn && editable && !message.media);
+    const hasEdit = canEdit;
     const hasDelete = Boolean(isOwn);
 
     const itemCount =
@@ -592,7 +602,7 @@ export function MessageBubble({
                             </button>
                           )}
 
-                          {isOwn && editable && !message.media && (
+                          {canEdit && (
                             <button
                               type="button"
                               role="menuitem"
