@@ -8,7 +8,7 @@ import { RoomList } from "@/features/chat/RoomList";
 import { ChatWindow } from "@/features/chat/ChatWindow";
 import { NewChatDialog } from "@/features/chat/NewChatDialog";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
-import { Menu, X } from "lucide-react";
+import { Menu, X, LogOut, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { MembersPanel } from "@/features/chat/MembersPanel";
 import { NotificationBanner } from "@/features/chat/NotificationBanner";
@@ -42,6 +42,8 @@ export default function Dashboard() {
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMembersOpen, setIsMembersOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [previews, setPreviews] = useState({}); // lastMessage id -> decrypted preview text
 
   // Resizable sidebar (laptop). Remembered between visits.
@@ -83,6 +85,29 @@ export default function Dashboard() {
       document.body.style.userSelect = userSelect;
     };
   }, [isResizing]);
+
+  // Handle escape key to close logout confirmation modal
+  useEffect(() => {
+    if (!showLogoutConfirm) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape" && !isLoggingOut) {
+        setShowLogoutConfirm(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showLogoutConfirm, isLoggingOut]);
+
+  const handleConfirmLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      toast.success("Signed out successfully");
+    } catch {
+      toast.error("Error signing out. Please try again.");
+      setIsLoggingOut(false);
+    }
+  };
 
   const startResize = (e) => {
     if (e.button !== 0) return;
@@ -542,21 +567,16 @@ export default function Dashboard() {
           previews={previews}
         />
 
-        <div className="border-t border-border p-3">
-          <Button
-            variant="ghost"
-            className="w-full hover:bg-rose-800"
-            onClick={async () => {
-              try {
-                await logout();
-                toast.success("Signed out");
-              } catch {
-                toast.error("Error signing out");
-              }
-            }}
+        <div className="border-t border-border p-3 bg-muted/20">
+          <button
+            type="button"
+            onClick={() => setShowLogoutConfirm(true)}
+            aria-label="Sign out"
+            className="group flex w-full items-center justify-center gap-2 rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-xs transition-all hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-[0.98]"
           >
-            Sign out
-          </Button>
+            <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+            <span>Sign out</span>
+          </button>
         </div>
       </aside>
 
@@ -631,6 +651,79 @@ export default function Dashboard() {
           currentUserId={user.id}
           socket={socket}
         />
+      )}
+
+      {/* Logout Confirmation Dialog (Bottom sheet on mobile, centered modal on desktop) */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-60 flex items-end justify-center sm:items-center sm:p-4">
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-150"
+            onClick={() => !isLoggingOut && setShowLogoutConfirm(false)}
+          />
+
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="logout-dialog-title"
+            aria-describedby="logout-dialog-desc"
+            className="relative z-10 w-full rounded-t-2xl border border-border bg-card p-6 shadow-2xl transition-all duration-200 sm:max-w-md sm:rounded-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))] animate-in fade-in zoom-in-95"
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+                <LogOut className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3
+                  id="logout-dialog-title"
+                  className="text-lg font-bold text-foreground"
+                >
+                  Sign out of Threadline?
+                </h3>
+                <p
+                  id="logout-dialog-desc"
+                  className="mt-1.5 text-sm text-muted-foreground"
+                >
+                  You will be signed out as{" "}
+                  <span className="font-semibold text-foreground">
+                    {user?.name || "User"}
+                  </span>
+                  . You'll need to enter your password to sign back in.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isLoggingOut}
+                onClick={() => setShowLogoutConfirm(false)}
+                className="rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={isLoggingOut}
+                onClick={handleConfirmLogout}
+                className="rounded-xl shadow-xs"
+              >
+                {isLoggingOut ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <span>Signing out…</span>
+                  </>
+                ) : (
+                  <>
+                    <LogOut className="mr-1.5 h-4 w-4" />
+                    <span>Sign out</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
