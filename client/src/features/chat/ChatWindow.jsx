@@ -413,7 +413,15 @@ export function ChatWindow({
       setMessages((prev) =>
         prev.map((m) =>
           m._id === messageId
-            ? { ...m, text: "", reactions: [], e2ee: undefined, deletedAt }
+            ? {
+                ...m,
+                text: "",
+                reactions: [],
+                e2ee: undefined,
+                media: null,
+                replyTo: null,
+                deletedAt,
+              }
             : m,
         ),
       );
@@ -762,11 +770,17 @@ export function ChatWindow({
     }
   };
 
-  const handleDeleteMessage = (messageId) => {
+  const handleDeleteMessage = (messageId, mediaPublicId) => {
     if (!socket) return;
-    socket.emit("message:delete", { roomId: room.id, messageId }, (ack) => {
-      if (!ack?.success) alert(ack?.message || "Couldn't delete that message.");
-    });
+    const msg = messages.find((m) => m._id === messageId);
+    const targetPublicId = mediaPublicId || msg?.media?.publicId || undefined;
+    socket.emit(
+      "message:delete",
+      { roomId: room.id, messageId, mediaPublicId: targetPublicId },
+      (ack) => {
+        if (!ack?.success) alert(ack?.message || "Couldn't delete that message.");
+      },
+    );
   };
 
   // ---------- 7) In-chat search logic (IndexedDB + around anchor pagination) ----------

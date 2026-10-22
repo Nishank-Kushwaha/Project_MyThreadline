@@ -318,7 +318,7 @@ export function MessageBubble({
 
   const handleDeleteClick = () => {
     if (window.confirm("Delete this message? This can't be undone.")) {
-      onDelete(message._id);
+      onDelete(message._id, message.media?.publicId);
     }
   };
 

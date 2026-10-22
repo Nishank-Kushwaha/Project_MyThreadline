@@ -37,3 +37,42 @@ export async function uploadMediaFile(
     stream.end(buffer);
   });
 }
+
+/**
+ * Deletes a media file from Cloudinary (encrypted raw blobs or plain media).
+ * Enforces that only files within chat media folders can be deleted.
+ */
+export async function deleteMediaFile(publicId, resourceType) {
+  if (!publicId || !isCloudinaryConfigured) return;
+
+  // Security guard: ensure only chat media folders can be deleted
+  if (
+    !publicId.startsWith(MEDIA_FOLDER_ENCRYPTED) &&
+    !publicId.startsWith(MEDIA_FOLDER_PLAIN)
+  ) {
+    return;
+  }
+
+  const isEncryptedFolder = publicId.startsWith(MEDIA_FOLDER_ENCRYPTED);
+  const candidates = resourceType
+    ? [resourceType, "raw", "image", "video"]
+    : isEncryptedFolder
+      ? ["raw", "image", "video"]
+      : ["image", "video", "raw"];
+
+  const uniqueCandidates = [...new Set(candidates)];
+
+  for (const type of uniqueCandidates) {
+    try {
+      const res = await cloudinary.uploader.destroy(publicId, {
+        resource_type: type,
+        invalidate: true,
+      });
+      if (res?.result === "ok") {
+        return;
+      }
+    } catch {
+      // Try next candidate
+    }
+  }
+}

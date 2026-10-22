@@ -11,6 +11,7 @@ import {
   validateReaction,
   viewForUser,
 } from "../../modules/messages/e2ee.validation.js";
+import { deleteMediaFile } from "../../modules/media/media.service.js";
 
 // Matches WhatsApp's own edit window — long enough to fix a typo, short
 // enough that an edit can't quietly rewrite history long after the fact.
@@ -441,44 +442,68 @@ function registerMessageHandlers(io, socket) {
 
   // Soft delete: sender-only, no time limit.
   // Keeps the document in the database to preserve conversation history.
-  socket.on("message:delete", async ({ roomId, messageId }, callback) => {
-    try {
-      const room = await Room.findOne({
-        _id: roomId,
-        "members.userId": socket.userId,
-      });
+  socket.on(
+    "message:delete",
+    async ({ roomId, messageId, mediaPublicId }, callback) => {
+      try {
+        const room = await Room.findOne({
+          _id: roomId,
+          "members.userId": socket.userId,
+        });
 
-      if (!room) {
-        throw new ApiError(403, "You are not a member of this room");
-      }
+        if (!room) {
+          throw new ApiError(403, "You are not a member of this room");
+        }
 
-      const message = await Message.findOne({
-        _id: messageId,
-        roomId,
-        type: { $ne: "system" },
-      });
+        const message = await Message.findOne({
+          _id: messageId,
+          roomId,
+          type: { $ne: "system" },
+        });
 
-      if (!message) {
-        throw new ApiError(404, "Message not found");
-      }
+        if (!message) {
+          throw new ApiError(404, "Message not found");
+        }
 
-      if (message.sender.toString() !== socket.userId) {
-        throw new ApiError(403, "You can only delete your own messages");
-      }
+        if (message.sender.toString() !== socket.userId) {
+          throw new ApiError(403, "You can only delete your own messages");
+        }
 
-      if (message.deletedAt) {
-        throw new ApiError(400, "Message already deleted");
-      }
+        if (message.deletedAt) {
+          throw new ApiError(400, "Message already deleted");
+        }
 
-      // Soft delete
-      const DELETED_PREVIEW_TEXT = "This message was deleted";
+        // Permanently delete media attachment from Cloudinary if present
+        // (works for both encrypted raw blobs and plain media)
+        const publicIdToDelete = message.media?.publicId || mediaPublicId;
+        if (publicIdToDelete) {
+          try {
+            await deleteMediaFile(publicIdToDelete);
+          } catch (err) {
+            console.error(
+              "[socket] Failed to delete media from Cloudinary:",
+              err.message,
+            );
+          }
+        }
 
-      message.text = DELETED_PREVIEW_TEXT;
-      message.reactions = [];
-      message.e2ee = undefined; // the ciphertext is removed along with the message
-      message.deletedAt = new Date();
+        // Soft delete: clear all text, reactions, E2EE envelope, and media metadata
+        const DELETED_PREVIEW_TEXT = "This message was deleted";
 
-      await message.save();
+        message.text = DELETED_PREVIEW_TEXT;
+        message.reactions = [];
+        message.e2ee = undefined; // ciphertext is removed along with the message
+        message.media = {
+          url: "",
+          publicId: "",
+          fileName: "",
+          fileType: "",
+          fileSize: 0,
+        };
+        message.replyTo = undefined;
+        message.deletedAt = new Date();
+
+        await message.save();
 
       // Update room's last message preview if necessary
       if (room.lastMessage?.messageId?.toString() === messageId) {
