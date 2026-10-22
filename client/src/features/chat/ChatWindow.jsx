@@ -20,6 +20,7 @@ import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { MessageSearchBar } from "./MessageSearchBar";
+import { TypingIndicator } from "./TypingIndicator";
 import { cn, formatLastSeen, formatDateSeparator } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
@@ -457,9 +458,17 @@ export function ChatWindow({
   useEffect(() => {
     if (!socket) return;
 
-    const handleTypingStart = ({ roomId, userId, name }) => {
+    const handleTypingStart = ({ roomId, userId, name, avatarUrl }) => {
       if (roomId !== room.id) return;
-      setTypingUsers((prev) => ({ ...prev, [userId]: name }));
+      const resolvedAvatar =
+        avatarUrl ||
+        (room.type === "private" ? room.avatarUrl : null) ||
+        messages.find((m) => m.sender?._id === userId)?.sender?.avatarUrl ||
+        "";
+      setTypingUsers((prev) => ({
+        ...prev,
+        [userId]: { name, avatarUrl: resolvedAvatar },
+      }));
       clearTimeout(expireTimers.current[userId]);
       expireTimers.current[userId] = setTimeout(
         () => removeTyping(userId),
@@ -1039,23 +1048,43 @@ export function ChatWindow({
     return null;
   }, [messages]);
 
-  // ---------- Header text ----------
-  const typingNames = Object.values(typingUsers);
+  // ---------- Typing indicator & Header text ----------
+  const typingList = Object.entries(typingUsers).map(([id, info]) => ({
+    id,
+    name: typeof info === "object" ? info.name : info,
+    avatarUrl: typeof info === "object" ? info.avatarUrl : "",
+  }));
+
   let typingText = "";
-  if (typingNames.length > 0) {
+  if (typingList.length > 0) {
     if (room.type === "private") typingText = "typing…";
-    else if (typingNames.length === 1)
-      typingText = `${typingNames[0]} is typing…`;
+    else if (typingList.length === 1)
+      typingText = `${typingList[0].name} is typing…`;
     else
-      typingText = `${typingNames.slice(0, 2).join(", ")}${typingNames.length > 2 ? " and others" : ""} are typing…`;
+      typingText = `${typingList.slice(0, 2).map((u) => u.name).join(", ")}${typingList.length > 2 ? " and others" : ""} are typing…`;
   }
 
   let subtitle;
-  if (typingText) subtitle = <span className="text-primary">{typingText}</span>;
-  else if (room.type === "group") subtitle = `${room.memberCount} members`;
-  else if (room.status === "online")
+  if (typingText) {
+    subtitle = (
+      <span className="flex items-center gap-1.5 font-medium text-primary animate-pulse">
+        <span>{typingText}</span>
+      </span>
+    );
+  } else if (room.type === "group") {
+    subtitle = `${room.memberCount} members`;
+  } else if (room.status === "online") {
     subtitle = <span className="text-primary">Online</span>;
-  else subtitle = formatLastSeen(room.lastSeen);
+  } else {
+    subtitle = formatLastSeen(room.lastSeen);
+  }
+
+  // Auto-scroll down to show the incoming typing indicator if already near bottom
+  useEffect(() => {
+    if (typingList.length > 0 && isNearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [typingList.length]);
 
   return (
     <div
@@ -1271,6 +1300,13 @@ export function ChatWindow({
               );
             })
           )}
+
+          {/* WhatsApp-style floating in-chat typing bubble */}
+          <TypingIndicator
+            typers={typingList}
+            isGroup={room.type === "group"}
+          />
+
           <div ref={bottomRef} />
         </div>
 

@@ -11,6 +11,7 @@ function registerTypingHandlers(socket) {
         roomId,
         userId: socket.userId,
         name: socket.userName || "Someone", // loaded from the DB at connect time, not trusted from the client
+        avatarUrl: socket.userAvatarUrl || "",
       });
     };
 

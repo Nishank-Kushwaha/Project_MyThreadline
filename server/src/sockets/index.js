@@ -53,10 +53,11 @@ function initSocket(server) {
     try {
       const [rooms, me] = await Promise.all([
         Room.find({ "members.userId": socket.userId }).select("_id").lean(),
-        User.findById(socket.userId).select("name").lean(),
+        User.findById(socket.userId).select("name avatarUrl").lean(),
       ]);
 
       socket.userName = me?.name; // used by the typing indicator
+      socket.userAvatarUrl = me?.avatarUrl;
 
       const roomIds = rooms.map((room) => room._id.toString());
       roomIds.forEach((id) => socket.join(id));
