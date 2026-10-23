@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Trash2, Send, Play, Pause, Loader2 } from "lucide-react";
+import { Trash2, Send, Play, Pause, Loader2, Mic } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useVoiceRecorder } from "./useVoiceRecorder";
+import { useVoiceRecorder, MAX_SECONDS } from "./useVoiceRecorder";
 
 const fmt = (s = 0) => {
   const t = Math.max(0, Math.floor(s));
@@ -16,12 +16,26 @@ const toFile = ({ blob, duration, ext, mimeType }) =>
   });
 
 export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
-  const rec = useVoiceRecorder();
   const [preview, setPreview] = useState(null); // { url, blob, duration, ... }
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const audioRef = useRef(null);
   const busyRef = useRef(false);
+
+  const showPreview = (snap) =>
+    setPreview({ ...snap, url: URL.createObjectURL(snap.blob) });
+
+  // When the limit is hit the hook fully STOPS the recorder (mic released) and
+  // calls this with the final recording, so we land in preview mode. Resume is
+  // disabled there because rec.isRecording is false.
+  const rec = useVoiceRecorder({
+    maxSeconds: MAX_SECONDS,
+    onMaxReached: (snap) => {
+      toast.info(`Maximum length of ${fmt(MAX_SECONDS)} reached.`);
+      if (snap) showPreview(snap);
+      else onCancelRef.current?.();
+    },
+  });
 
   // Keep latest onCancel in a ref → the start effect runs ONCE (fixes the restart bug)
   const onCancelRef = useRef(onCancel);
@@ -44,6 +58,7 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
 
   useEffect(() => () => preview && URL.revokeObjectURL(preview.url), [preview]);
 
+  // Stop completely (releases the mic). Used by "send now".
   const finish = async () => {
     if (busyRef.current) return null;
     busyRef.current = true;
@@ -59,13 +74,42 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
   const sendNow = async () => {
     const r = await finish();
     if (!r) return;
-    setPreview({ ...r, url: URL.createObjectURL(r.blob) });
+    showPreview(r);
     onSendVoice?.(toFile(r));
   };
 
+  // Pause (mic stays open) and show the preview so the user can listen,
+  // then Resume, Discard or Send.
   const review = async () => {
-    const r = await finish();
-    if (r) setPreview({ ...r, url: URL.createObjectURL(r.blob) });
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const snap = await rec.pause();
+      if (!snap) {
+        toast.error("Recording was too short or empty.");
+        onCancelRef.current?.();
+        return;
+      }
+      showPreview(snap);
+    } finally {
+      busyRef.current = false;
+    }
+  };
+
+  // Go back to recording: continues the SAME recording after the paused part.
+  const resume = () => {
+    audioRef.current?.pause();
+    setPlaying(false);
+    setTime(0);
+    if (rec.resume()) {
+      setPreview(null); // effect cleanup revokes the old preview URL
+    } else {
+      toast.error(
+        rec.seconds >= rec.maxSeconds
+          ? `Maximum length of ${fmt(rec.maxSeconds)} reached.`
+          : "Couldn't resume recording.",
+      );
+    }
   };
 
   const discard = () => {
@@ -79,6 +123,9 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
     playing ? a.pause() : a.play().catch(() => {});
   };
 
+  const atLimit = rec.seconds >= rec.maxSeconds;
+  const nearLimit = rec.seconds >= rec.maxSeconds - 30;
+
   const iconBtn =
     "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition active:scale-95 disabled:opacity-40";
 
@@ -91,7 +138,13 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
               <span className="relative inline-flex h-3 w-3 rounded-full bg-red-500" />
             </span>
-            <span className="font-mono text-xs font-semibold">
+            <span
+              className={cn(
+                "font-mono text-xs font-semibold",
+                nearLimit && "text-red-500",
+              )}
+              title={`Maximum ${fmt(rec.maxSeconds)}`}
+            >
               {fmt(rec.seconds)}
             </span>
           </div>
@@ -125,8 +178,11 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
             <button
               type="button"
               onClick={review}
-              disabled={isSending || !rec.isRecording || rec.seconds < 1}
-              aria-label="Stop and review"
+              disabled={
+                isSending || !rec.isRecording || rec.isPaused || rec.seconds < 1
+              }
+              aria-label="Pause and review"
+              title="Pause and review"
               className={cn(iconBtn, "hover:bg-muted hover:text-foreground")}
             >
               <Pause className="h-4 w-4 fill-current" />
@@ -134,7 +190,7 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
             <button
               type="button"
               onClick={sendNow}
-              disabled={isSending || !rec.isRecording}
+              disabled={isSending || !rec.isRecording || rec.isPaused}
               aria-label="Send voice message"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition hover:brightness-110 active:scale-95 disabled:opacity-50"
             >
@@ -200,6 +256,23 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
           >
             <Trash2 className="h-4 w-4" />
           </button>
+
+          {/* Resume: only while the recorder is still open (paused) and below the limit */}
+          <button
+            type="button"
+            onClick={resume}
+            disabled={isSending || !rec.isRecording || atLimit}
+            aria-label="Resume recording"
+            title={
+              atLimit
+                ? `Maximum length of ${fmt(rec.maxSeconds)} reached`
+                : "Resume recording"
+            }
+            className={cn(iconBtn, "hover:bg-muted hover:text-foreground")}
+          >
+            <Mic className="h-4 w-4" />
+          </button>
+
           <button
             type="button"
             onClick={() => onSendVoice?.(toFile(preview))}
