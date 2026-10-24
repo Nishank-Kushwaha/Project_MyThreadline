@@ -1,7 +1,20 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useMemo } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { MicOff, VideoOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+/** Bind a stream to a <video> only if it changed, and force muted in code (React's `muted` prop is unreliable). */
+function useBindVideo(ref, stream, deps = []) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.muted = true;
+    el.defaultMuted = true;
+    if (el.srcObject !== stream) el.srcObject = stream || null;
+    if (stream) el.play().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream, ...deps]);
+}
 
 export function VideoGrid({
   localStream,
@@ -17,66 +30,59 @@ export function VideoGrid({
 }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const remoteAudioRef = useRef(null);
 
-  // Bind local stream
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-      localVideoRef.current.play().catch(() => {});
-    }
-  }, [localStream, isVideoDisabled]);
+  // VIDEO-ONLY streams: audio can never be played from these elements,
+  // so local mic audio can't loop back and remote audio isn't doubled.
+  const localVideoStream = useMemo(
+    () => (localStream ? new MediaStream(localStream.getVideoTracks()) : null),
+    [localStream],
+  );
+  const remoteVideoStream = useMemo(
+    () =>
+      remoteStream ? new MediaStream(remoteStream.getVideoTracks()) : null,
+    [remoteStream],
+  );
 
-  // Bind remote stream to video element
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
-      remoteVideoRef.current.play().catch((err) => {
-        console.warn("[VideoGrid] remote video play error:", err);
-      });
-    }
-  }, [remoteStream, peerMediaState.isVideoDisabled]);
-
-  // Dedicated audio binding to guarantee remote audio ALWAYS plays
-  useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      remoteAudioRef.current.srcObject = remoteStream;
-      remoteAudioRef.current.play().catch((err) => {
-        console.warn("[VideoGrid] remote audio play error:", err);
-      });
-    }
-  }, [remoteStream]);
+  useBindVideo(localVideoRef, localVideoStream, [isVideoDisabled, isMinimized]);
+  useBindVideo(remoteVideoRef, remoteVideoStream, [
+    peerMediaState.isVideoDisabled,
+  ]);
 
   const hasRemoteVideo =
     callType === "video" &&
     remoteStream &&
     !peerMediaState.isVideoDisabled &&
-    remoteStream.getVideoTracks().some((t) => t.readyState === "live" && !t.muted);
+    remoteStream
+      .getVideoTracks()
+      .some((t) => t.readyState === "live" && !t.muted);
 
   const hasLocalVideo =
     callType === "video" &&
     localStream &&
     !isVideoDisabled &&
-    localStream.getVideoTracks().some((t) => t.readyState === "live" && t.enabled);
+    localStream
+      .getVideoTracks()
+      .some((t) => t.readyState === "live" && t.enabled);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
-      {/* 0. DEDICATED AUDIO ELEMENT - Always present in DOM for continuous, uninterrupted voice playback */}
-      <audio ref={remoteAudioRef} autoPlay playsInline />
+      {/* Remote audio is played by <RemoteAudio/> (mounted in CallProvider), not here. */}
 
-      {/* 1. REMOTE FEED (Full Background) - muted so it does not conflict with dedicated audio element */}
+      {/* 1. REMOTE FEED */}
       <video
         ref={remoteVideoRef}
         autoPlay
         playsInline
         muted
-        className={cn("h-full w-full object-cover", !hasRemoteVideo && "hidden")}
+        className={cn(
+          "h-full w-full object-cover",
+          !hasRemoteVideo && "hidden",
+        )}
       />
 
       {!hasRemoteVideo && (
         <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
           <div className="relative">
-            {/* Animated ripple wave rings */}
             <div className="absolute -inset-4 animate-ping rounded-full bg-primary/20 opacity-40" />
             <div className="absolute -inset-8 animate-pulse rounded-full bg-primary/10 opacity-30" />
             <Avatar
@@ -99,17 +105,17 @@ export function VideoGrid({
         </div>
       )}
 
-      {/* 2. LOCAL FEED (Picture-in-Picture in Corner) */}
+      {/* 2. LOCAL FEED (picture-in-picture) */}
       {!isMinimized && callType === "video" && (
         <div className="absolute right-4 top-4 z-20 h-40 w-28 sm:h-48 sm:w-36 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl">
           <video
             ref={localVideoRef}
             autoPlay
             playsInline
-            muted // Always mute local video element to prevent echo feedback loop
+            muted
             className={cn(
               "h-full w-full object-cover",
-              !isScreenSharing && "scale-x-[-1]", // Don't mirror screen share
+              !isScreenSharing && "scale-x-[-1]",
               !hasLocalVideo && "hidden",
             )}
           />
@@ -128,7 +134,6 @@ export function VideoGrid({
             </div>
           )}
 
-          {/* Local Status Indicators */}
           <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-md">
             <span>You</span>
             {isAudioMuted && <MicOff className="h-2.5 w-2.5 text-red-400" />}

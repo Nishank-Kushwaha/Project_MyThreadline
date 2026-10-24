@@ -7,7 +7,33 @@ const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun2.l.google.com:19302" },
 ];
 
-// Helper to fetch dynamic ICE servers with authenticated session right when a call starts
+const AUDIO_MAX_BITRATE = 32000; // plenty for wideband Opus voice
+
+const QUALITY_PROFILES = {
+  good: {
+    camera: 1_500_000,
+    screen: 2_500_000,
+    camFps: 30,
+    screenFps: 15,
+    scale: 1,
+  },
+  fair: {
+    camera: 800_000,
+    screen: 1_200_000,
+    camFps: 24,
+    screenFps: 10,
+    scale: 1.5,
+  },
+  poor: {
+    camera: 300_000,
+    screen: 500_000,
+    camFps: 15,
+    screenFps: 5,
+    scale: 2,
+  },
+};
+const QUALITY_ORDER = { good: 0, fair: 1, poor: 2 };
+
 async function getFreshIceServers() {
   try {
     const data = await fetchIceServersRequest();
@@ -20,34 +46,162 @@ async function getFreshIceServers() {
   return DEFAULT_ICE_SERVERS;
 }
 
-export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }) {
+/** Tune Opus for voice: mono, in-band FEC, capped bitrate (also helps echo cancellation). */
+function tuneOpus(sdp) {
+  if (!sdp) return sdp;
+  const rtpmap = sdp.match(/a=rtpmap:(\d+) opus\/48000\/2/i);
+  if (!rtpmap) return sdp;
+  const pt = rtpmap[1];
+
+  const wanted = {
+    minptime: "10",
+    useinbandfec: "1",
+    stereo: "0",
+    "sprop-stereo": "0",
+    maxaveragebitrate: String(AUDIO_MAX_BITRATE),
+    cbr: "0",
+  };
+
+  const fmtpRe = new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`);
+  const existing = sdp.match(fmtpRe);
+
+  if (existing) {
+    const map = {};
+    existing[1].split(";").forEach((kv) => {
+      const [k, v] = kv.trim().split("=");
+      if (k) map[k] = v;
+    });
+    Object.assign(map, wanted);
+    const line = `a=fmtp:${pt} ${Object.entries(map)
+      .map(([k, v]) => (v === undefined ? k : `${k}=${v}`))
+      .join(";")}`;
+    return sdp.replace(fmtpRe, line);
+  }
+
+  const line = `a=fmtp:${pt} ${Object.entries(wanted)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(";")}`;
+  return sdp.replace(
+    new RegExp(`(a=rtpmap:${pt} opus/48000/2\\r?\\n)`, "i"),
+    `$1${line}\r\n`,
+  );
+}
+
+async function setLocalTuned(pc, desc) {
+  await pc.setLocalDescription({ type: desc.type, sdp: tuneOpus(desc.sdp) });
+  return { type: pc.localDescription.type, sdp: pc.localDescription.sdp };
+}
+
+function setSendRecv(pc) {
+  pc.getTransceivers().forEach((t) => {
+    if (t.currentDirection !== "stopped") t.direction = "sendrecv";
+  });
+}
+
+/** Make sure an m-line exists for each media kind so tracks can be added later via replaceTrack. */
+function ensureTransceivers(pc, { audio = true, video = false }) {
+  const has = (kind) =>
+    pc.getTransceivers().some((t) => t.receiver.track.kind === kind);
+  if (audio && !has("audio"))
+    pc.addTransceiver("audio", { direction: "sendrecv" });
+  if (video && !has("video"))
+    pc.addTransceiver("video", { direction: "sendrecv" });
+}
+
+async function applySenderQuality(pc, level = "good") {
+  if (!pc || pc.connectionState === "closed") return;
+  const profile = QUALITY_PROFILES[level];
+
+  for (const sender of pc.getSenders()) {
+    const track = sender.track;
+    if (!track) continue;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0)
+        params.encodings = [{}];
+      const enc = params.encodings[0];
+
+      if (track.kind === "audio") {
+        enc.maxBitrate = AUDIO_MAX_BITRATE;
+        enc.priority = "high";
+        enc.networkPriority = "high";
+      } else {
+        const isScreen = track.contentHint === "detail";
+        enc.maxBitrate = isScreen ? profile.screen : profile.camera;
+        enc.maxFramerate = isScreen ? profile.screenFps : profile.camFps;
+        enc.scaleResolutionDownBy = isScreen ? 1 : profile.scale;
+        params.degradationPreference = isScreen
+          ? "maintain-resolution"
+          : "balanced";
+      }
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn("[webrtc] setParameters failed:", err.message);
+    }
+  }
+}
+
+export function useWebRTC({
+  socket,
+  onPeerMediaToggle,
+  onConnectionStateChange,
+}) {
   const [remoteStream, setRemoteStream] = useState(null);
   const [connectionState, setConnectionState] = useState("new");
   const [iceConnectionState, setIceConnectionState] = useState("new");
+  const [networkQuality, setNetworkQuality] = useState("good");
 
   const pcRef = useRef(null);
   const iceCandidateQueueRef = useRef([]);
   const activeCallIdRef = useRef(null);
+  const isOffererRef = useRef(false);
+  const setupIdRef = useRef(0);
+  const restartTimerRef = useRef(null);
+  const qualityRef = useRef("good");
 
-  // Flush queued ICE candidates after remote description is active
+  // Latest socket/callbacks without re-creating handlers
+  const socketRef = useRef(socket);
+  const cbRef = useRef({ onPeerMediaToggle, onConnectionStateChange });
+  useEffect(() => {
+    socketRef.current = socket;
+    cbRef.current = { onPeerMediaToggle, onConnectionStateChange };
+  });
+
   const drainIceCandidateQueue = useCallback(async (pc) => {
     if (!pc || !pc.remoteDescription) return;
-
     while (iceCandidateQueueRef.current.length > 0) {
       const candidate = iceCandidateQueueRef.current.shift();
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        await pc.addIceCandidate(candidate);
       } catch (err) {
-        console.warn("[webrtc] error adding buffered ICE candidate:", err);
+        console.warn("[webrtc] buffered ICE candidate error:", err.message);
       }
     }
   }, []);
 
-  // Initialize RTCPeerConnection
+  const restartIce = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc || !activeCallIdRef.current) return;
+    if (pc.signalingState !== "stable") return; // negotiation already in flight
+
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      if (pc !== pcRef.current || pc.signalingState !== "stable") return;
+      const sdp = await setLocalTuned(pc, offer);
+      socketRef.current?.emit("call:sdp-offer", {
+        callId: activeCallIdRef.current,
+        sdp,
+      });
+    } catch (err) {
+      console.warn("[webrtc] restartIce error:", err);
+    }
+  }, []);
+
   const initPeerConnection = useCallback(
-    (callId, localStream, iceServers, isOfferer = false) => {
+    (callId, localStream, iceServers, isOfferer) => {
       activeCallIdRef.current = callId;
-      iceCandidateQueueRef.current = [];
+      isOffererRef.current = isOfferer;
+      // Do NOT clear the ICE queue here: candidates may have arrived already.
 
       if (pcRef.current) {
         pcRef.current.close();
@@ -57,167 +211,167 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
       const pc = new RTCPeerConnection({
         iceServers: iceServers || DEFAULT_ICE_SERVERS,
         iceCandidatePoolSize: 2,
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require",
       });
-
       pcRef.current = pc;
 
-      // 1. Attach local tracks to the connection
-      if (localStream) {
-        localStream.getTracks().forEach((track) => {
-          pc.addTrack(track, localStream);
-        });
-      }
+      localStream
+        ?.getTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
-      // 2. Remote track received (accumulates all received tracks without discarding existing ones)
       pc.ontrack = (event) => {
+        if (pc !== pcRef.current) return;
         const track = event.track;
         if (!track) return;
 
         track.onmute = () => {
-          if (track.kind === "video") {
-            onPeerMediaToggle?.({ kind: "video", enabled: false });
-          }
+          if (track.kind === "video")
+            cbRef.current.onPeerMediaToggle?.({
+              kind: "video",
+              enabled: false,
+            });
         };
         track.onunmute = () => {
-          if (track.kind === "video") {
-            onPeerMediaToggle?.({ kind: "video", enabled: true });
-          }
+          if (track.kind === "video")
+            cbRef.current.onPeerMediaToggle?.({ kind: "video", enabled: true });
         };
 
-        setRemoteStream((prevStream) => {
-          const currentTracks = prevStream ? prevStream.getTracks() : [];
-          // Keep all existing tracks except replacing any with identical track id
-          const filtered = currentTracks.filter((t) => t.id !== track.id);
+        setRemoteStream((prev) => {
+          const existing = prev ? prev.getTracks() : [];
+          const filtered = existing.filter((t) => t.id !== track.id);
           return new MediaStream([...filtered, track]);
         });
       };
 
-      // 3. ICE candidate generated locally -> send to peer via signaling
       pc.onicecandidate = (event) => {
+        if (pc !== pcRef.current) return;
         if (event.candidate && activeCallIdRef.current) {
-          socket?.emit("call:ice-candidate", {
+          socketRef.current?.emit("call:ice-candidate", {
             callId: activeCallIdRef.current,
             candidate: event.candidate.toJSON(),
           });
         }
       };
 
-      // 4. Connection State changes
       pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        setConnectionState(state);
-        onConnectionStateChange?.(state);
+        if (pc !== pcRef.current) return;
+        setConnectionState(pc.connectionState);
+        cbRef.current.onConnectionStateChange?.(pc.connectionState);
       };
 
-      // 5. ICE Connection State changes (handles reconnects / ICE restart)
       pc.oniceconnectionstatechange = () => {
+        if (pc !== pcRef.current) return;
         const state = pc.iceConnectionState;
         setIceConnectionState(state);
 
-        // Network switched (e.g. Wi-Fi -> Mobile Data)
-        if (state === "disconnected" && isOfferer) {
-          console.log("[webrtc] ICE connection disconnected, restarting ICE...");
-          restartIce();
+        if (state === "connected" || state === "completed") {
+          clearTimeout(restartTimerRef.current);
+          restartTimerRef.current = null;
+          return;
+        }
+
+        // "disconnected" often self-heals, so debounce; "failed" restarts right away.
+        if (
+          (state === "disconnected" || state === "failed") &&
+          isOffererRef.current &&
+          !restartTimerRef.current
+        ) {
+          restartTimerRef.current = setTimeout(
+            () => {
+              restartTimerRef.current = null;
+              if (
+                pcRef.current === pc &&
+                pc.iceConnectionState !== "connected" &&
+                pc.iceConnectionState !== "completed"
+              ) {
+                console.log("[webrtc] restarting ICE...");
+                restartIce();
+              }
+            },
+            state === "failed" ? 0 : 3000,
+          );
         }
       };
 
       return pc;
     },
-    [socket, onConnectionStateChange],
+    [restartIce],
   );
 
-  // Offerer creates and sends initial SDP Offer (fetches fresh ICE servers when call starts)
-  const createOffer = useCallback(async (callId, localStream) => {
-    const iceServers = await getFreshIceServers();
-    const pc = initPeerConnection(callId, localStream, iceServers, true);
+  const createOffer = useCallback(
+    async (callId, localStream, { video = true } = {}) => {
+      const myId = ++setupIdRef.current;
+      const iceServers = await getFreshIceServers();
+      if (myId !== setupIdRef.current) return null; // superseded or closed
 
-    try {
-      // Ensure audio and video transceivers are set to sendrecv
-      const audioTransceiver = pc.getTransceivers().find(
-        (t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio",
-      );
-      if (audioTransceiver) {
-        audioTransceiver.direction = "sendrecv";
+      const pc = initPeerConnection(callId, localStream, iceServers, true);
+      try {
+        ensureTransceivers(pc, { audio: true, video });
+        setSendRecv(pc);
+        const offer = await pc.createOffer();
+        const sdp = await setLocalTuned(pc, offer);
+        socketRef.current?.emit("call:sdp-offer", { callId, sdp });
+        return offer;
+      } catch (err) {
+        console.error("[webrtc] createOffer error:", err);
+        throw err;
       }
+    },
+    [initPeerConnection],
+  );
 
-      const videoTransceiver = pc.getTransceivers().find(
-        (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-      );
-      if (videoTransceiver) {
-        videoTransceiver.direction = "sendrecv";
-      }
-
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-
-      await pc.setLocalDescription(offer);
-
-      socket?.emit("call:sdp-offer", {
-        callId,
-        sdp: pc.localDescription,
-      });
-
-      return offer;
-    } catch (err) {
-      console.error("[webrtc] createOffer error:", err);
-      throw err;
-    }
-  }, [initPeerConnection, socket]);
-
-  // Answerer receives SDP Offer and returns SDP Answer (fetches fresh ICE servers when call is accepted)
   const handleOfferAndAnswer = useCallback(
     async (callId, sdpOffer, localStream) => {
-      const iceServers = await getFreshIceServers();
-      const pc = initPeerConnection(callId, localStream, iceServers, false);
+      let pc = pcRef.current;
+      const isRenegotiation =
+        pc &&
+        activeCallIdRef.current === callId &&
+        pc.connectionState !== "closed";
+
+      if (!isRenegotiation) {
+        const myId = ++setupIdRef.current;
+        const iceServers = await getFreshIceServers();
+        if (myId !== setupIdRef.current) return null;
+        pc = initPeerConnection(callId, localStream, iceServers, false);
+      }
 
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
+        // Glare: answerer is the "polite" side and rolls back its own pending offer
+        if (pc.signalingState === "have-local-offer") {
+          await pc.setLocalDescription({ type: "rollback" });
+        }
 
-        // Drain any ICE candidates that arrived before offer was set
+        await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
         await drainIceCandidateQueue(pc);
 
-        // Ensure audio and video transceivers are set to sendrecv so answerer can send audio/video at any time
-        const audioTransceiver = pc.getTransceivers().find(
-          (t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio",
-        );
-        if (audioTransceiver) {
-          audioTransceiver.direction = "sendrecv";
-        }
+        setSendRecv(pc);
+        const answer = await pc.createAnswer();
+        const sdp = await setLocalTuned(pc, answer);
 
-        const videoTransceiver = pc.getTransceivers().find(
-          (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-        );
-        if (videoTransceiver) {
-          videoTransceiver.direction = "sendrecv";
-        }
-
-        const answer = await pc.createAnswer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        });
-        await pc.setLocalDescription(answer);
-
-        socket?.emit("call:sdp-answer", {
-          callId,
-          sdp: pc.localDescription,
-        });
-
+        socketRef.current?.emit("call:sdp-answer", { callId, sdp });
         return answer;
       } catch (err) {
         console.error("[webrtc] handleOfferAndAnswer error:", err);
         throw err;
       }
     },
-    [initPeerConnection, drainIceCandidateQueue, socket],
+    [initPeerConnection, drainIceCandidateQueue],
   );
 
-  // Offerer receives remote SDP Answer
   const handleAnswer = useCallback(
     async (sdpAnswer) => {
       const pc = pcRef.current;
       if (!pc) return;
+
+      // An answer is only valid while we hold a local offer
+      if (pc.signalingState !== "have-local-offer") {
+        console.warn(
+          "[webrtc] ignoring answer, signalingState =",
+          pc.signalingState,
+        );
+        return;
+      }
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(sdpAnswer));
@@ -229,103 +383,135 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
     [drainIceCandidateQueue],
   );
 
-  // Handle incoming remote ICE candidates (with queue buffering)
-  const handleRemoteIceCandidate = useCallback(
-    async (candidate) => {
-      const pc = pcRef.current;
-
-      // If remote description isn't set yet, buffer the candidate to avoid race condition
-      if (!pc || !pc.remoteDescription) {
-        iceCandidateQueueRef.current.push(candidate);
-        return;
-      }
-
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.warn("[webrtc] addIceCandidate error:", err);
-      }
-    },
-    [],
-  );
-
-  // Trigger ICE restart on network handoff (e.g. Wi-Fi to cellular)
-  const restartIce = useCallback(async () => {
+  const handleRemoteIceCandidate = useCallback(async (candidate) => {
+    if (!candidate) return;
     const pc = pcRef.current;
-    if (!pc || !activeCallIdRef.current) return;
 
-    try {
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-
-      socket?.emit("call:sdp-offer", {
-        callId: activeCallIdRef.current,
-        sdp: pc.localDescription,
-      });
-    } catch (err) {
-      console.warn("[webrtc] restartIce error:", err);
-    }
-  }, [socket]);
-
-  // Replace video track on active peer connection (works for webcam -> screen share and vice versa)
-  const replaceVideoTrack = useCallback(async (newTrack) => {
-    const pc = pcRef.current;
-    if (!pc) {
-      console.warn("[webrtc] replaceVideoTrack called with no active peer connection");
+    if (!pc || !pc.remoteDescription) {
+      iceCandidateQueueRef.current.push(candidate);
       return;
     }
-
-    // 1. Locate the video transceiver
-    const videoTransceiver = pc.getTransceivers().find(
-      (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-    );
-
-    if (videoTransceiver) {
-      if (videoTransceiver.direction !== "sendrecv") {
-        videoTransceiver.direction = "sendrecv";
-      }
-      await videoTransceiver.sender.replaceTrack(newTrack);
-    } else {
-      // 2. Fallback to senders
-      const senders = pc.getSenders();
-      const videoSender = senders.find(
-        (s) => (s.track && s.track.kind === "video") || (!s.track && s.dtlsTransport),
-      );
-
-      if (videoSender) {
-        await videoSender.replaceTrack(newTrack);
-      } else if (newTrack) {
-        pc.addTrack(newTrack);
-      }
+    try {
+      await pc.addIceCandidate(candidate);
+    } catch (err) {
+      console.warn("[webrtc] addIceCandidate error:", err.message);
     }
   }, []);
 
-  // Clean teardown
+  const replaceVideoTrack = useCallback(async (newTrack) => {
+    const pc = pcRef.current;
+    if (!pc) return;
+
+    const transceiver = pc
+      .getTransceivers()
+      .find((t) => t.receiver.track.kind === "video");
+    if (!transceiver) {
+      console.warn("[webrtc] no video m-line negotiated; cannot swap track");
+      return;
+    }
+    if (transceiver.direction !== "sendrecv")
+      transceiver.direction = "sendrecv";
+
+    await transceiver.sender.replaceTrack(newTrack);
+    if (newTrack) await applySenderQuality(pc, qualityRef.current);
+  }, []);
+
   const closeConnection = useCallback(() => {
+    setupIdRef.current++; // cancel in-flight async setups
+    clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = null;
     activeCallIdRef.current = null;
     iceCandidateQueueRef.current = [];
+    qualityRef.current = "good";
 
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
-
     setRemoteStream(null);
+    setNetworkQuality("good");
     setConnectionState("closed");
     setIceConnectionState("closed");
   }, []);
 
+  useEffect(() => closeConnection, [closeConnection]);
+
+  // Network came back (e.g. Wi-Fi reconnect) -> try to restart ICE
   useEffect(() => {
-    return () => {
-      closeConnection();
+    const onOnline = () => {
+      if (isOffererRef.current && pcRef.current) restartIce();
     };
-  }, [closeConnection]);
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [restartIce]);
+
+  // Adaptive quality: watch loss/RTT and cap bitrate accordingly
+  useEffect(() => {
+    if (connectionState !== "connected") return;
+
+    const setQuality = (level) => {
+      qualityRef.current = level;
+      setNetworkQuality(level);
+      applySenderQuality(pcRef.current, level);
+    };
+    applySenderQuality(pcRef.current, qualityRef.current);
+
+    let goodStreak = 0;
+    const id = setInterval(async () => {
+      const pc = pcRef.current;
+      if (!pc) return;
+      try {
+        const stats = await pc.getStats();
+        let rtt = 0;
+        let loss = 0;
+        stats.forEach((r) => {
+          if (r.type === "remote-inbound-rtp") {
+            if (r.roundTripTime) rtt = Math.max(rtt, r.roundTripTime);
+            if (typeof r.fractionLost === "number")
+              loss = Math.max(loss, r.fractionLost);
+          }
+          if (
+            r.type === "candidate-pair" &&
+            r.nominated &&
+            r.currentRoundTripTime
+          ) {
+            rtt = Math.max(rtt, r.currentRoundTripTime);
+          }
+        });
+
+        const next =
+          loss > 0.1 || rtt > 0.6
+            ? "poor"
+            : loss > 0.03 || rtt > 0.3
+              ? "fair"
+              : "good";
+        const cur = qualityRef.current;
+
+        if (QUALITY_ORDER[next] > QUALITY_ORDER[cur]) {
+          goodStreak = 0;
+          setQuality(next); // degrade immediately
+        } else if (QUALITY_ORDER[next] < QUALITY_ORDER[cur]) {
+          if (++goodStreak >= 3) {
+            goodStreak = 0;
+            setQuality(next); // recover only after sustained improvement
+          }
+        } else {
+          goodStreak = 0;
+        }
+      } catch {
+        /* pc closed mid-poll */
+      }
+    }, 4000);
+
+    return () => clearInterval(id);
+  }, [connectionState]);
 
   return {
     pc: pcRef.current,
     remoteStream,
     connectionState,
     iceConnectionState,
+    networkQuality,
     createOffer,
     handleOfferAndAnswer,
     handleAnswer,
