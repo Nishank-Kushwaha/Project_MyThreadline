@@ -110,7 +110,9 @@ function registerMessageHandlers(io, socket) {
           deliveredTo,
         });
         await message.populate("sender", "name avatarUrl");
-        await message.populate("poll.votes.userId", "name avatarUrl");
+        if (message.poll) {
+          await message.populate("poll.votes.userId", "name avatarUrl");
+        }
 
         room.members.forEach((member) => {
           if (member.userId.toString() !== socket.userId)

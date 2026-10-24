@@ -27,22 +27,25 @@ const messageSchema = new Schema(
     // Poll message metadata & encrypted votes.
     // Question and option labels are encrypted inside `e2ee`.
     poll: {
-      options: [
-        {
-          _id: false,
-          id: { type: String, required: true },
-        },
-      ],
-      allowMultipleAnswers: { type: Boolean, default: false },
-      votes: [
-        {
-          _id: false,
-          userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-          iv: { type: String, required: true },
-          ciphertext: { type: String, required: true },
-          updatedAt: { type: Date, default: Date.now },
-        },
-      ],
+      type: {
+        options: [
+          {
+            _id: false,
+            id: { type: String, required: true },
+          },
+        ],
+        allowMultipleAnswers: { type: Boolean, default: false },
+        votes: [
+          {
+            _id: false,
+            userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+            iv: { type: String, required: true },
+            ciphertext: { type: String, required: true },
+            updatedAt: { type: Date, default: Date.now },
+          },
+        ],
+      },
+      default: null,
     },
 
     // True for an end-to-end encrypted message. Its contents are in `e2ee`.

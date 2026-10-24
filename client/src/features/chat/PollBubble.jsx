@@ -13,7 +13,7 @@ export function PollBubble({
 }) {
   const [isVotesDialogOpen, setIsVotesDialogOpen] = useState(false);
 
-  if (!poll) return null;
+  if (!poll || !poll.question) return null;
 
   const {
     question = "",

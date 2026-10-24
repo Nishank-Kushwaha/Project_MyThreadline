@@ -123,11 +123,13 @@ export function MessageBubble({
   // "who am I talking to" without repeating it on every bubble.
   const showAvatar = isGroup && !isOwn;
 
+  const hasPoll = Boolean(message.poll && message.poll.question);
+
   // WhatsApp-style: only allow editing own text messages sent within the 15-minute window
   const isWithinEditWindow =
     Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
   const canEdit = Boolean(
-    isOwn && editable && !message.media && !message.poll && isWithinEditWindow,
+    isOwn && editable && !message.media && !hasPoll && isWithinEditWindow,
   );
 
   // --------------------------------------------------
@@ -179,7 +181,7 @@ export function MessageBubble({
   const handleReply = () => {
     if (!onReply || isDeleted) return;
     let snippet = message.text || "";
-    if (message.poll) {
+    if (hasPoll) {
       snippet = `📊 Poll: ${message.poll.question || "Poll"}`;
     }
     let mediaType = "";
@@ -333,7 +335,7 @@ export function MessageBubble({
 
   const copyMessageText = async () => {
     let textToCopy = message.text;
-    if (message.poll) {
+    if (hasPoll) {
       textToCopy = [
         `📊 ${message.poll.question}`,
         ...(message.poll.options || []).map((o, idx) => `${idx + 1}. ${o.text}`),
@@ -354,7 +356,7 @@ export function MessageBubble({
         document.body.removeChild(textArea);
       }
       toast.success(
-        message.poll
+        hasPoll
           ? "Poll copied to clipboard"
           : "Message copied to clipboard",
         { duration: 2000 },
@@ -382,7 +384,7 @@ export function MessageBubble({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    const hasCopy = Boolean(message.text || message.poll);
+    const hasCopy = Boolean(message.text || hasPoll);
     const hasReply = Boolean(onReply && !isDeleted);
     const hasEdit = canEdit;
     const hasDelete = Boolean(isOwn);
@@ -756,7 +758,7 @@ export function MessageBubble({
                     {message.media && (
                       <MediaAttachment media={message.media} isOwn={isOwn} />
                     )}
-                    {message.poll && (
+                    {hasPoll && (
                       <PollBubble
                         poll={message.poll}
                         messageId={message._id}
@@ -767,7 +769,7 @@ export function MessageBubble({
                         isOwn={isOwn}
                       />
                     )}
-                    {message.text && !message.media && !message.poll && (
+                    {message.text && !message.media && !hasPoll && (
                       <LinkPreviewCard
                         url={extractFirstUrl(message.text)}
                         isOwn={isOwn}

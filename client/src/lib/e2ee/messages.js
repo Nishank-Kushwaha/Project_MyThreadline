@@ -106,15 +106,13 @@ export async function decryptMessage(message, { roomId, userId }) {
         ...payload.poll,
         votes: decryptedVotes,
       };
-    } else if (message.poll) {
-      poll = message.poll;
     }
 
     return {
       ...message,
       text: payload.text || "",
       media: payload.media || null,
-      replyTo: payload.replyTo || message.replyTo || null,
+      replyTo: payload.replyTo || null,
       secret,
       poll,
       reactions: await decryptReactions(message.reactions, {
