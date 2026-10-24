@@ -20,7 +20,17 @@ async function getFreshIceServers() {
   return DEFAULT_ICE_SERVERS;
 }
 
-export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }) {
+function setSendRecv(pc) {
+  pc.getTransceivers().forEach((t) => {
+    if (t.direction !== "stopped" && !t.stopped) t.direction = "sendrecv";
+  });
+}
+
+export function useWebRTC({
+  socket,
+  onPeerMediaToggle,
+  onConnectionStateChange,
+}) {
   const [remoteStream, setRemoteStream] = useState(null);
   const [connectionState, setConnectionState] = useState("new");
   const [iceConnectionState, setIceConnectionState] = useState("new");
@@ -28,26 +38,58 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
   const pcRef = useRef(null);
   const iceCandidateQueueRef = useRef([]);
   const activeCallIdRef = useRef(null);
+  const isOffererRef = useRef(false);
+  const setupIdRef = useRef(0); // guards against overlapping async setups
+  const restartTimerRef = useRef(null);
 
-  // Flush queued ICE candidates after remote description is active
+  // Keep latest socket/callbacks in refs so handlers never go stale
+  const socketRef = useRef(socket);
+  const cbRef = useRef({ onPeerMediaToggle, onConnectionStateChange });
+  useEffect(() => {
+    socketRef.current = socket;
+    cbRef.current = { onPeerMediaToggle, onConnectionStateChange };
+  });
+
   const drainIceCandidateQueue = useCallback(async (pc) => {
     if (!pc || !pc.remoteDescription) return;
-
     while (iceCandidateQueueRef.current.length > 0) {
       const candidate = iceCandidateQueueRef.current.shift();
       try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        await pc.addIceCandidate(candidate);
       } catch (err) {
         console.warn("[webrtc] error adding buffered ICE candidate:", err);
       }
     }
   }, []);
 
-  // Initialize RTCPeerConnection
+  const restartIce = useCallback(async () => {
+    const pc = pcRef.current;
+    if (!pc || !activeCallIdRef.current) return;
+
+    // Only the offerer restarts, and only when no negotiation is in flight
+    if (pc.signalingState !== "stable") {
+      console.warn("[webrtc] skip ICE restart, state:", pc.signalingState);
+      return;
+    }
+
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      if (pc !== pcRef.current || pc.signalingState !== "stable") return;
+      await pc.setLocalDescription(offer);
+      socketRef.current?.emit("call:sdp-offer", {
+        callId: activeCallIdRef.current,
+        sdp: pc.localDescription,
+      });
+    } catch (err) {
+      console.warn("[webrtc] restartIce error:", err);
+    }
+  }, []);
+
   const initPeerConnection = useCallback(
-    (callId, localStream, iceServers, isOfferer = false) => {
+    (callId, localStream, iceServers, isOfferer) => {
       activeCallIdRef.current = callId;
-      iceCandidateQueueRef.current = [];
+      isOffererRef.current = isOfferer;
+      // NOTE: do NOT clear the ICE queue here, candidates may already be buffered
 
       if (pcRef.current) {
         pcRef.current.close();
@@ -58,166 +100,173 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
         iceServers: iceServers || DEFAULT_ICE_SERVERS,
         iceCandidatePoolSize: 2,
       });
-
       pcRef.current = pc;
 
-      // 1. Attach local tracks to the connection
-      if (localStream) {
-        localStream.getTracks().forEach((track) => {
-          pc.addTrack(track, localStream);
-        });
-      }
+      localStream
+        ?.getTracks()
+        .forEach((track) => pc.addTrack(track, localStream));
 
-      // 2. Remote track received (accumulates all received tracks without discarding existing ones)
       pc.ontrack = (event) => {
+        if (pc !== pcRef.current) return;
         const track = event.track;
         if (!track) return;
 
         track.onmute = () => {
-          if (track.kind === "video") {
-            onPeerMediaToggle?.({ kind: "video", enabled: false });
-          }
+          if (track.kind === "video")
+            cbRef.current.onPeerMediaToggle?.({
+              kind: "video",
+              enabled: false,
+            });
         };
         track.onunmute = () => {
-          if (track.kind === "video") {
-            onPeerMediaToggle?.({ kind: "video", enabled: true });
-          }
+          if (track.kind === "video")
+            cbRef.current.onPeerMediaToggle?.({ kind: "video", enabled: true });
         };
 
-        setRemoteStream((prevStream) => {
-          const currentTracks = prevStream ? prevStream.getTracks() : [];
-          // Keep all existing tracks except replacing any with identical track id
-          const filtered = currentTracks.filter((t) => t.id !== track.id);
+        setRemoteStream((prev) => {
+          const existing = prev ? prev.getTracks() : [];
+          const filtered = existing.filter((t) => t.id !== track.id);
           return new MediaStream([...filtered, track]);
         });
       };
 
-      // 3. ICE candidate generated locally -> send to peer via signaling
       pc.onicecandidate = (event) => {
+        if (pc !== pcRef.current) return;
         if (event.candidate && activeCallIdRef.current) {
-          socket?.emit("call:ice-candidate", {
+          socketRef.current?.emit("call:ice-candidate", {
             callId: activeCallIdRef.current,
             candidate: event.candidate.toJSON(),
           });
         }
       };
 
-      // 4. Connection State changes
       pc.onconnectionstatechange = () => {
-        const state = pc.connectionState;
-        setConnectionState(state);
-        onConnectionStateChange?.(state);
+        if (pc !== pcRef.current) return;
+        setConnectionState(pc.connectionState);
+        cbRef.current.onConnectionStateChange?.(pc.connectionState);
       };
 
-      // 5. ICE Connection State changes (handles reconnects / ICE restart)
       pc.oniceconnectionstatechange = () => {
+        if (pc !== pcRef.current) return;
         const state = pc.iceConnectionState;
         setIceConnectionState(state);
 
-        // Network switched (e.g. Wi-Fi -> Mobile Data)
-        if (state === "disconnected" && isOfferer) {
-          console.log("[webrtc] ICE connection disconnected, restarting ICE...");
-          restartIce();
+        if (state === "connected" || state === "completed") {
+          clearTimeout(restartTimerRef.current);
+          restartTimerRef.current = null;
+          return;
+        }
+
+        // Debounced: "disconnected" often recovers by itself
+        if (
+          (state === "disconnected" || state === "failed") &&
+          isOffererRef.current &&
+          !restartTimerRef.current
+        ) {
+          restartTimerRef.current = setTimeout(
+            () => {
+              restartTimerRef.current = null;
+              if (
+                pcRef.current === pc &&
+                pc.iceConnectionState !== "connected" &&
+                pc.iceConnectionState !== "completed"
+              ) {
+                console.log("[webrtc] restarting ICE...");
+                restartIce();
+              }
+            },
+            state === "failed" ? 0 : 3000,
+          );
         }
       };
 
       return pc;
     },
-    [socket, onConnectionStateChange],
+    [restartIce],
   );
 
-  // Offerer creates and sends initial SDP Offer (fetches fresh ICE servers when call starts)
-  const createOffer = useCallback(async (callId, localStream) => {
-    const iceServers = await getFreshIceServers();
-    const pc = initPeerConnection(callId, localStream, iceServers, true);
-
-    try {
-      // Ensure audio and video transceivers are set to sendrecv
-      const audioTransceiver = pc.getTransceivers().find(
-        (t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio",
-      );
-      if (audioTransceiver) {
-        audioTransceiver.direction = "sendrecv";
-      }
-
-      const videoTransceiver = pc.getTransceivers().find(
-        (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-      );
-      if (videoTransceiver) {
-        videoTransceiver.direction = "sendrecv";
-      }
-
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-
-      await pc.setLocalDescription(offer);
-
-      socket?.emit("call:sdp-offer", {
-        callId,
-        sdp: pc.localDescription,
-      });
-
-      return offer;
-    } catch (err) {
-      console.error("[webrtc] createOffer error:", err);
-      throw err;
-    }
-  }, [initPeerConnection, socket]);
-
-  // Answerer receives SDP Offer and returns SDP Answer (fetches fresh ICE servers when call is accepted)
-  const handleOfferAndAnswer = useCallback(
-    async (callId, sdpOffer, localStream) => {
+  const createOffer = useCallback(
+    async (callId, localStream) => {
+      const myId = ++setupIdRef.current;
       const iceServers = await getFreshIceServers();
-      const pc = initPeerConnection(callId, localStream, iceServers, false);
+      if (myId !== setupIdRef.current) return null; // superseded by a newer call/close
 
+      const pc = initPeerConnection(callId, localStream, iceServers, true);
       try {
-        await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
-
-        // Drain any ICE candidates that arrived before offer was set
-        await drainIceCandidateQueue(pc);
-
-        // Ensure audio and video transceivers are set to sendrecv so answerer can send audio/video at any time
-        const audioTransceiver = pc.getTransceivers().find(
-          (t) => t.receiver?.track?.kind === "audio" || t.sender?.track?.kind === "audio",
-        );
-        if (audioTransceiver) {
-          audioTransceiver.direction = "sendrecv";
-        }
-
-        const videoTransceiver = pc.getTransceivers().find(
-          (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-        );
-        if (videoTransceiver) {
-          videoTransceiver.direction = "sendrecv";
-        }
-
-        const answer = await pc.createAnswer({
+        setSendRecv(pc);
+        const offer = await pc.createOffer({
           offerToReceiveAudio: true,
           offerToReceiveVideo: true,
         });
-        await pc.setLocalDescription(answer);
-
-        socket?.emit("call:sdp-answer", {
+        await pc.setLocalDescription(offer);
+        socketRef.current?.emit("call:sdp-offer", {
           callId,
           sdp: pc.localDescription,
         });
+        return offer;
+      } catch (err) {
+        console.error("[webrtc] createOffer error:", err);
+        throw err;
+      }
+    },
+    [initPeerConnection],
+  );
 
+  const handleOfferAndAnswer = useCallback(
+    async (callId, sdpOffer, localStream) => {
+      let pc = pcRef.current;
+      const isRenegotiation =
+        pc &&
+        activeCallIdRef.current === callId &&
+        pc.connectionState !== "closed";
+
+      // Fresh call -> build a new connection. Renegotiation (ICE restart) -> reuse it.
+      if (!isRenegotiation) {
+        const myId = ++setupIdRef.current;
+        const iceServers = await getFreshIceServers();
+        if (myId !== setupIdRef.current) return null;
+        pc = initPeerConnection(callId, localStream, iceServers, false);
+      }
+
+      try {
+        // Glare: we have our own pending offer, roll it back (answerer is "polite")
+        if (pc.signalingState === "have-local-offer") {
+          await pc.setLocalDescription({ type: "rollback" });
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(sdpOffer));
+        await drainIceCandidateQueue(pc);
+
+        setSendRecv(pc);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socketRef.current?.emit("call:sdp-answer", {
+          callId,
+          sdp: pc.localDescription,
+        });
         return answer;
       } catch (err) {
         console.error("[webrtc] handleOfferAndAnswer error:", err);
         throw err;
       }
     },
-    [initPeerConnection, drainIceCandidateQueue, socket],
+    [initPeerConnection, drainIceCandidateQueue],
   );
 
-  // Offerer receives remote SDP Answer
   const handleAnswer = useCallback(
     async (sdpAnswer) => {
       const pc = pcRef.current;
       if (!pc) return;
+
+      // The fix for your error: an answer is only valid in have-local-offer
+      if (pc.signalingState !== "have-local-offer") {
+        console.warn(
+          "[webrtc] ignoring answer, signalingState =",
+          pc.signalingState,
+        );
+        return;
+      }
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(sdpAnswer));
@@ -229,79 +278,44 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
     [drainIceCandidateQueue],
   );
 
-  // Handle incoming remote ICE candidates (with queue buffering)
-  const handleRemoteIceCandidate = useCallback(
-    async (candidate) => {
-      const pc = pcRef.current;
-
-      // If remote description isn't set yet, buffer the candidate to avoid race condition
-      if (!pc || !pc.remoteDescription) {
-        iceCandidateQueueRef.current.push(candidate);
-        return;
-      }
-
-      try {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch (err) {
-        console.warn("[webrtc] addIceCandidate error:", err);
-      }
-    },
-    [],
-  );
-
-  // Trigger ICE restart on network handoff (e.g. Wi-Fi to cellular)
-  const restartIce = useCallback(async () => {
+  const handleRemoteIceCandidate = useCallback(async (candidate) => {
     const pc = pcRef.current;
-    if (!pc || !activeCallIdRef.current) return;
+    if (!candidate) return;
 
-    try {
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-
-      socket?.emit("call:sdp-offer", {
-        callId: activeCallIdRef.current,
-        sdp: pc.localDescription,
-      });
-    } catch (err) {
-      console.warn("[webrtc] restartIce error:", err);
-    }
-  }, [socket]);
-
-  // Replace video track on active peer connection (works for webcam -> screen share and vice versa)
-  const replaceVideoTrack = useCallback(async (newTrack) => {
-    const pc = pcRef.current;
-    if (!pc) {
-      console.warn("[webrtc] replaceVideoTrack called with no active peer connection");
+    if (!pc || !pc.remoteDescription) {
+      iceCandidateQueueRef.current.push(candidate);
       return;
     }
-
-    // 1. Locate the video transceiver
-    const videoTransceiver = pc.getTransceivers().find(
-      (t) => t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video",
-    );
-
-    if (videoTransceiver) {
-      if (videoTransceiver.direction !== "sendrecv") {
-        videoTransceiver.direction = "sendrecv";
-      }
-      await videoTransceiver.sender.replaceTrack(newTrack);
-    } else {
-      // 2. Fallback to senders
-      const senders = pc.getSenders();
-      const videoSender = senders.find(
-        (s) => (s.track && s.track.kind === "video") || (!s.track && s.dtlsTransport),
-      );
-
-      if (videoSender) {
-        await videoSender.replaceTrack(newTrack);
-      } else if (newTrack) {
-        pc.addTrack(newTrack);
-      }
+    try {
+      await pc.addIceCandidate(candidate);
+    } catch (err) {
+      console.warn("[webrtc] addIceCandidate error:", err);
     }
   }, []);
 
-  // Clean teardown
+  const replaceVideoTrack = useCallback(async (newTrack) => {
+    const pc = pcRef.current;
+    if (!pc) return;
+
+    const videoTransceiver = pc
+      .getTransceivers()
+      .find(
+        (t) =>
+          t.receiver?.track?.kind === "video" ||
+          t.sender?.track?.kind === "video",
+      );
+
+    if (videoTransceiver) {
+      await videoTransceiver.sender.replaceTrack(newTrack);
+    } else if (newTrack) {
+      pc.addTrack(newTrack);
+    }
+  }, []);
+
   const closeConnection = useCallback(() => {
+    setupIdRef.current++; // cancel any in-flight async setup
+    clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = null;
     activeCallIdRef.current = null;
     iceCandidateQueueRef.current = [];
 
@@ -309,17 +323,12 @@ export function useWebRTC({ socket, onPeerMediaToggle, onConnectionStateChange }
       pcRef.current.close();
       pcRef.current = null;
     }
-
     setRemoteStream(null);
     setConnectionState("closed");
     setIceConnectionState("closed");
   }, []);
 
-  useEffect(() => {
-    return () => {
-      closeConnection();
-    };
-  }, [closeConnection]);
+  useEffect(() => closeConnection, [closeConnection]);
 
   return {
     pc: pcRef.current,
