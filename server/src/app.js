@@ -13,6 +13,7 @@ import roomsRoutes from "./modules/rooms/rooms.routes.js";
 import pushRoutes from "./modules/push/push.routes.js";
 import keysRoutes from "./modules/keys/keys.routes.js";
 import mediaRoutes from "./modules/media/media.routes.js";
+import callsRoutes from "./modules/calls/calls.routes.js";
 
 import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 
@@ -39,6 +40,7 @@ app.use("/api/rooms", roomsRoutes);
 app.use("/api/push", pushRoutes);
 app.use("/api/keys", keysRoutes);
 app.use("/api/media", mediaRoutes);
+app.use("/api/calls", callsRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

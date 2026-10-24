@@ -4,6 +4,7 @@ import socketAuth from "./middlewares/socketAuth.js";
 import registerRoomHandlers from "./handlers/room.handler.js";
 import registerMessageHandlers from "./handlers/message.handler.js";
 import registerTypingHandlers from "./handlers/typing.handler.js";
+import registerCallHandlers from "./handlers/call.handler.js";
 import {
   handleConnectPresence,
   handleDisconnectPresence,
@@ -34,6 +35,7 @@ function initSocket(server) {
     registerRoomHandlers(socket);
     registerMessageHandlers(io, socket);
     registerTypingHandlers(socket);
+    registerCallHandlers(io, socket);
 
     // "disconnecting" fires while the socket is still in its rooms; by the time
     // "disconnect" fires they're gone. Grab the room list now for presence.

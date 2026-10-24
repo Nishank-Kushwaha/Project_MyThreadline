@@ -37,6 +37,10 @@ const env = {
     privateKey: process.env.VAPID_PRIVATE_KEY,
     subject: process.env.VAPID_SUBJECT,
   },
+  metered: {
+    domain: process.env.METERED_DOMAIN || "",
+    apiKey: process.env.METERED_API_KEY || "",
+  },
 };
 
 export default env;
