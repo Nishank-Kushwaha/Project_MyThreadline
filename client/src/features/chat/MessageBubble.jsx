@@ -19,6 +19,7 @@ import { ReactionPills } from "./ReactionPills";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { MediaAttachment } from "./MediaAttachment";
+import { PollBubble } from "./PollBubble";
 import {
   FormattedMessageText,
   LinkPreviewCard,
@@ -88,6 +89,7 @@ export function MessageBubble({
   onReply,
   onEdit,
   onDelete,
+  onVote,
 }) {
   const [showQuickBar, setShowQuickBar] = useState(false);
   const [showFullPicker, setShowFullPicker] = useState(false);
@@ -125,7 +127,7 @@ export function MessageBubble({
   const isWithinEditWindow =
     Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
   const canEdit = Boolean(
-    isOwn && editable && !message.media && isWithinEditWindow,
+    isOwn && editable && !message.media && !message.poll && isWithinEditWindow,
   );
 
   // --------------------------------------------------
@@ -177,6 +179,9 @@ export function MessageBubble({
   const handleReply = () => {
     if (!onReply || isDeleted) return;
     let snippet = message.text || "";
+    if (message.poll) {
+      snippet = `📊 Poll: ${message.poll.question || "Poll"}`;
+    }
     let mediaType = "";
     if (message.media) {
       const mime = String(message.media.fileType || "").toLowerCase();
@@ -327,13 +332,20 @@ export function MessageBubble({
   // --------------------------------------------------
 
   const copyMessageText = async () => {
-    if (!message.text) return;
+    let textToCopy = message.text;
+    if (message.poll) {
+      textToCopy = [
+        `📊 ${message.poll.question}`,
+        ...(message.poll.options || []).map((o, idx) => `${idx + 1}. ${o.text}`),
+      ].join("\n");
+    }
+    if (!textToCopy) return;
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(message.text);
+        await navigator.clipboard.writeText(textToCopy);
       } else {
         const textArea = document.createElement("textarea");
-        textArea.value = message.text;
+        textArea.value = textToCopy;
         textArea.style.position = "fixed";
         textArea.style.left = "-999999px";
         document.body.appendChild(textArea);
@@ -341,7 +353,12 @@ export function MessageBubble({
         document.execCommand("copy");
         document.body.removeChild(textArea);
       }
-      toast.success("Message copied to clipboard", { duration: 2000 });
+      toast.success(
+        message.poll
+          ? "Poll copied to clipboard"
+          : "Message copied to clipboard",
+        { duration: 2000 },
+      );
     } catch (err) {
       console.error("Failed to copy message:", err);
       toast.error("Failed to copy message");
@@ -365,7 +382,7 @@ export function MessageBubble({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    const hasCopy = Boolean(message.text);
+    const hasCopy = Boolean(message.text || message.poll);
     const hasReply = Boolean(onReply && !isDeleted);
     const hasEdit = canEdit;
     const hasDelete = Boolean(isOwn);
@@ -739,7 +756,18 @@ export function MessageBubble({
                     {message.media && (
                       <MediaAttachment media={message.media} isOwn={isOwn} />
                     )}
-                    {message.text && !message.media && (
+                    {message.poll && (
+                      <PollBubble
+                        poll={message.poll}
+                        messageId={message._id}
+                        currentUserId={currentUserId}
+                        onVote={(selectedOptionIds) =>
+                          onVote?.(message._id, selectedOptionIds)
+                        }
+                        isOwn={isOwn}
+                      />
+                    )}
+                    {message.text && !message.media && !message.poll && (
                       <LinkPreviewCard
                         url={extractFirstUrl(message.text)}
                         isOwn={isOwn}

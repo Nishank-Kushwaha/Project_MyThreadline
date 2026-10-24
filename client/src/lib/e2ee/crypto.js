@@ -1,4 +1,4 @@
-import { base64UrlToBytes, bytesToBase64Url } from "./encoding";
+import { base64UrlToBytes, bytesToBase64Url } from "./encoding.js";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -7,6 +7,7 @@ const VERSION = 1;
 const CURVE = { name: "ECDH", namedCurve: "P-256" };
 
 const REACTION_BLOCK = 64;
+const POLL_VOTE_BLOCK = 128;
 
 export class DecryptError extends Error {
   constructor(reason) {
@@ -380,4 +381,103 @@ export async function decryptReaction({
   }
 
   return decoder.decode(block.slice(1, 1 + length));
+}
+
+// ---------- Poll Votes ----------
+async function derivePollVoteKey(secret, roomId, messageId) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    base64UrlToBytes(secret),
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(32),
+      info: encoder.encode(
+        `threadline-e2ee/v1/poll-vote-key|${roomId}|${messageId}`,
+      ),
+    },
+    material,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+const pollVoteAad = (roomId, messageId, voterId) =>
+  encoder.encode(
+    `threadline-e2ee/v1/poll-vote|${roomId}|${messageId}|${voterId}`,
+  );
+
+export async function encryptPollVote({
+  secret,
+  roomId,
+  messageId,
+  voterId,
+  selectedOptionIds = [],
+}) {
+  const jsonStr = JSON.stringify(selectedOptionIds);
+  const bytes = encoder.encode(jsonStr);
+
+  if (bytes.length === 0 || bytes.length > POLL_VOTE_BLOCK - 1) {
+    throw new Error("Too many options selected.");
+  }
+
+  // Padded to a fixed size so the ciphertext length doesn't leak the choices
+  const block = new Uint8Array(POLL_VOTE_BLOCK);
+  block[0] = bytes.length;
+  block.set(bytes, 1);
+
+  const key = await derivePollVoteKey(secret, roomId, messageId);
+  const iv = randomBytes(12);
+
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv,
+      additionalData: pollVoteAad(roomId, messageId, voterId),
+    },
+    key,
+    block,
+  );
+
+  return {
+    iv: bytesToBase64Url(iv),
+    ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)),
+  };
+}
+
+export async function decryptPollVote({
+  secret,
+  roomId,
+  messageId,
+  voterId,
+  vote,
+}) {
+  const key = await derivePollVoteKey(secret, roomId, messageId);
+
+  const block = new Uint8Array(
+    await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: base64UrlToBytes(vote.iv),
+        additionalData: pollVoteAad(roomId, messageId, voterId),
+      },
+      key,
+      base64UrlToBytes(vote.ciphertext),
+    ),
+  );
+
+  const length = block[0];
+  if (length === 0 || length > POLL_VOTE_BLOCK - 1) {
+    throw new Error("Invalid poll vote");
+  }
+
+  const jsonStr = decoder.decode(block.slice(1, 1 + length));
+  return JSON.parse(jsonStr);
 }

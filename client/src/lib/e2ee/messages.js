@@ -3,15 +3,16 @@ import { getRoomEncryption } from "./directory";
 import {
   decryptEnvelope,
   decryptReaction,
+  decryptPollVote,
   encryptEnvelope,
   encryptReaction,
+  encryptPollVote,
   generateMessageSecret,
 } from "./crypto";
 
 export const MAX_TEXT_LENGTH = 4000;
 export const ENCRYPTED_PREVIEW = "🔒 Encrypted message";
 
-// Decides how to send: -> { e2ee } for an encrypted message, or { text } for a
 // Decides how to send: -> { e2ee } for an encrypted message, or { text } for a
 // chat that can't be encrypted yet. Throws with a readable message.
 export async function buildOutgoingMessage({
@@ -20,6 +21,7 @@ export async function buildOutgoingMessage({
   text = "",
   media = null,
   replyTo = null,
+  poll = null,
   secret,
 }) {
   if (text && text.length > MAX_TEXT_LENGTH) {
@@ -39,7 +41,12 @@ export async function buildOutgoingMessage({
 
   // Not everyone can read encrypted messages yet and the chat isn't locked in.
   if (!hasAllKeys(info) && !mustEncrypt) {
-    return { text: text || "", ...(media && { media }), ...(replyTo && { replyTo }) };
+    return {
+      text: text || "",
+      ...(media && { media }),
+      ...(replyTo && { replyTo }),
+      ...(poll && { poll }),
+    };
   }
 
   // A private chat with a device-less person has nobody who could read it.
@@ -55,6 +62,7 @@ export async function buildOutgoingMessage({
       text: text || "",
       ...(media && { media }),
       ...(replyTo && { replyTo }),
+      ...(poll && { poll }),
       secret: secret ?? generateMessageSecret(),
     },
     sender: {
@@ -66,12 +74,20 @@ export async function buildOutgoingMessage({
     recipients: info.devices,
   });
 
-  return { e2ee: envelope };
+  return {
+    e2ee: envelope,
+    ...(poll && {
+      poll: {
+        options: poll.options.map((o) => ({ id: o.id })),
+        allowMultipleAnswers: Boolean(poll.allowMultipleAnswers),
+      },
+    }),
+  };
 }
 
 // Plaintext and system messages come back unchanged. Encrypted ones come back
-// with `text` filled in, `media` (if attached), `secret` (used for reactions), their reactions
-// decrypted, and `decrypt`: "ok" | "failed" | "other-device" | "not-recipient".
+// with `text` filled in, `media` (if attached), `secret` (used for reactions & votes), their reactions
+// & poll votes decrypted, and `decrypt`: "ok" | "failed" | "other-device" | "not-recipient".
 export async function decryptMessage(message, { roomId, userId }) {
   if (!message.encrypted || !message.e2ee) return message;
 
@@ -87,12 +103,28 @@ export async function decryptMessage(message, { roomId, userId }) {
 
     const secret = payload.secret ?? null;
 
+    let poll = null;
+    if (payload.poll) {
+      const decryptedVotes = await decryptPollVotes(message.poll?.votes || [], {
+        secret,
+        roomId,
+        messageId: message._id,
+      });
+      poll = {
+        ...payload.poll,
+        votes: decryptedVotes,
+      };
+    } else if (message.poll) {
+      poll = message.poll;
+    }
+
     return {
       ...message,
       text: payload.text || "",
       media: payload.media || null,
       replyTo: payload.replyTo || message.replyTo || null,
       secret,
+      poll,
       reactions: await decryptReactions(message.reactions, {
         secret,
         roomId,
@@ -111,6 +143,7 @@ export async function decryptMessage(message, { roomId, userId }) {
       text: "",
       media: null,
       secret: null,
+      poll: null,
       // Sealed reactions can't be opened without the message; plain ones can.
       reactions: (message.reactions ?? []).filter((r) => !r.ciphertext),
       decrypt: reasons[err.reason] ?? "failed",
@@ -133,6 +166,7 @@ export async function decryptPreview(lastMessage, { roomId, userId }) {
       me: identity,
     });
 
+    if (payload.poll) return `📊 Poll: ${payload.poll.question || "Poll"}`;
     if (payload.text) return payload.text;
     if (payload.media) {
       if (payload.media.fileType?.startsWith("image/")) return "📷 Photo";
@@ -208,4 +242,65 @@ export async function buildReactionRequest({
       emoji,
     }),
   };
+}
+
+// Decrypt poll votes using the message secret
+export async function decryptPollVotes(
+  votes = [],
+  { secret, roomId, messageId },
+) {
+  const opened = await Promise.all(
+    votes.map(async (v) => {
+      if (!v.ciphertext) return v;
+      if (!secret) return null;
+
+      try {
+        const voterId = String(v.userId?._id ?? v.userId);
+
+        const selectedOptionIds = await decryptPollVote({
+          secret,
+          roomId,
+          messageId,
+          voterId,
+          vote: v,
+        });
+
+        return {
+          userId: v.userId,
+          selectedOptionIds,
+          updatedAt: v.updatedAt,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return opened.filter(Boolean);
+}
+
+// What to send when voting on a poll
+export async function buildPollVoteRequest({
+  message,
+  selectedOptionIds = [],
+  roomId,
+  currentUserId,
+}) {
+  if (!message.encrypted) {
+    return { selectedOptionIds };
+  }
+
+  if (!message.secret) {
+    throw new Error("Voting is not available on this poll.");
+  }
+
+  const vote = await encryptPollVote({
+    secret: message.secret,
+    roomId,
+    messageId: message._id,
+    voterId: currentUserId,
+    selectedOptionIds,
+  });
+
+  return { vote };
 }

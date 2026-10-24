@@ -178,9 +178,24 @@ function validateReaction(raw) {
   return { iv: raw.iv, ciphertext: raw.ciphertext };
 }
 
+// An encrypted poll vote: 12-byte iv, and the sealed 128-byte block + 16-byte tag (144 bytes total = 192 chars).
+function validatePollVote(raw) {
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    !isBase64Url(raw.iv, 16) ||
+    !isBase64Url(raw.ciphertext, 192)
+  ) {
+    throw invalid("Invalid poll vote");
+  }
+
+  return { iv: raw.iv, ciphertext: raw.ciphertext };
+}
+
 export {
   allMembersHaveDeviceKeys,
   validateEnvelope,
   validateReaction,
+  validatePollVote,
   viewForUser,
 };

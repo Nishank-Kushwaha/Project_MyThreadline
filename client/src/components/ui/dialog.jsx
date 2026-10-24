@@ -1,4 +1,5 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 
 export function Dialog({ open, onOpenChange, children }) {
   React.useEffect(() => {
@@ -10,7 +11,7 @@ export function Dialog({ open, onOpenChange, children }) {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/60"
@@ -19,6 +20,7 @@ export function Dialog({ open, onOpenChange, children }) {
       <div className="relative z-10 w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-lg">
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

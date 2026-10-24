@@ -26,6 +26,7 @@ async function getRoomMessages(
         .limit(half + 1)
         .populate("sender", "name avatarUrl")
         .populate("reactions.userId", "name")
+        .populate("poll.votes.userId", "name avatarUrl")
         .lean();
 
       // Fetch messages after the target
@@ -37,6 +38,7 @@ async function getRoomMessages(
         .limit(half)
         .populate("sender", "name avatarUrl")
         .populate("reactions.userId", "name")
+        .populate("poll.votes.userId", "name avatarUrl")
         .lean();
 
       // Combine in chronological order: older reversed + newer
@@ -54,6 +56,7 @@ async function getRoomMessages(
     .limit(limit)
     .populate("sender", "name avatarUrl")
     .populate("reactions.userId", "name")
+    .populate("poll.votes.userId", "name avatarUrl")
     .lean();
 
   return messages.reverse().map((m) => viewForUser(m, userId)); // oldest-first, with only this user's locks

@@ -167,6 +167,7 @@ async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
             ? "New message"
             : trimText(
                 message.text ||
+                  (message.poll?.question ? `📊 Poll: ${message.poll.question}` : "") ||
                   (message.media?.fileType?.startsWith("image/")
                     ? "📷 Photo"
                     : "📎 Attachment"),

@@ -9,6 +9,7 @@ import {
   allMembersHaveDeviceKeys,
   validateEnvelope,
   validateReaction,
+  validatePollVote,
   viewForUser,
 } from "../../modules/messages/e2ee.validation.js";
 import { deleteMediaFile } from "../../modules/media/media.service.js";
@@ -40,152 +41,173 @@ function emitToMembers(io, room, event, buildPayload) {
 function registerMessageHandlers(io, socket) {
   // Fired when a user sends a message. The server saves it, updates the room's
   // lastMessage, and broadcasts it to everyone in the room (including the sender).
-  socket.on("message:send", async ({ roomId, text, media, e2ee, replyTo }, callback) => {
-    try {
-      const room = await Room.findOne({
-        _id: roomId,
-        "members.userId": socket.userId,
-      });
-      if (!room) throw new ApiError(403, "You are not a member of this room");
-
-      // Chats are end-to-end encrypted once every member has a registered
-      // device key. From then on plaintext is refused, so a bug or an old
-      // client can't silently downgrade the chat.
-      let envelope = null;
-      const ready = await allMembersHaveDeviceKeys(room);
-
-      if (room.encrypted || ready) {
-        if (!e2ee) {
-          throw new ApiError(
-            400,
-            "This chat is end-to-end encrypted. Reload the app and try again.",
-          );
-        }
-
-        // In E2EE chats, all media and reply metadata are sealed inside e2ee
-        if (media) {
-          throw new ApiError(
-            400,
-            "Unencrypted media is not allowed in an end-to-end encrypted chat.",
-          );
-        }
-        if (replyTo) {
-          throw new ApiError(
-            400,
-            "Unencrypted reply data is not allowed in an end-to-end encrypted chat.",
-          );
-        }
-
-        envelope = await validateEnvelope(e2ee, {
-          room,
-          userId: socket.userId,
-          deviceId: socket.data.deviceId,
+  socket.on(
+    "message:send",
+    async ({ roomId, text, media, poll, e2ee, replyTo }, callback) => {
+      try {
+        const room = await Room.findOne({
+          _id: roomId,
+          "members.userId": socket.userId,
         });
-        room.encrypted = true;
-      } else if (e2ee) {
-        throw new ApiError(
-          400,
-          room.type === "private"
-            ? "The other person hasn't set up encryption yet"
-            : "Some members haven't set up encryption yet",
-        );
-      }
+        if (!room) throw new ApiError(403, "You are not a member of this room");
 
-      if (!envelope && (!text || !text.trim()) && !media?.url) {
-        throw new ApiError(400, "Message text or media is required");
-      }
+        // Chats are end-to-end encrypted once every member has a registered
+        // device key. From then on plaintext is refused, so a bug or an old
+        // client can't silently downgrade the chat.
+        let envelope = null;
+        const ready = await allMembersHaveDeviceKeys(room);
 
-      // Recipients who are online right now have received it the instant it's
-      // broadcast => "delivered". Offline ones are marked later, when they
-      // reconnect (see presence.handler.js).
-      const otherIds = room.members
-        .map((m) => m.userId.toString())
-        .filter((id) => id !== socket.userId);
-      const deliveredTo = await getOnlineUserIds(io, otherIds);
+        if (room.encrypted || ready) {
+          if (!e2ee) {
+            throw new ApiError(
+              400,
+              "This chat is end-to-end encrypted. Reload the app and try again.",
+            );
+          }
 
-      const message = await Message.create({
-        roomId,
-        sender: socket.userId,
-        encrypted: Boolean(envelope),
-        text: envelope ? "" : (text?.trim() || ""),
-        ...(replyTo && !envelope && {
-          replyTo: {
-            messageId: replyTo.messageId,
-            senderName: replyTo.senderName || "",
-            text: replyTo.text || "",
-            mediaType: replyTo.mediaType || "",
-          },
-        }),
-        ...(media && !envelope && {
-          media: {
-            url: media.url,
-            publicId: media.publicId || "",
-            fileName: media.fileName || "",
-            fileType: media.fileType || "",
-            fileSize: Number(media.fileSize) || 0,
-          },
-        }),
-        ...(envelope && { e2ee: envelope }),
-        deliveredTo,
-      });
-      await message.populate("sender", "name avatarUrl");
+          // In E2EE chats, all media, reply, and sensitive poll details are sealed inside e2ee
+          if (media) {
+            throw new ApiError(
+              400,
+              "Unencrypted media is not allowed in an end-to-end encrypted chat.",
+            );
+          }
+          if (replyTo) {
+            throw new ApiError(
+              400,
+              "Unencrypted reply data is not allowed in an end-to-end encrypted chat.",
+            );
+          }
 
-      room.members.forEach((member) => {
-        if (member.userId.toString() !== socket.userId) member.unreadCount += 1;
-      });
+          envelope = await validateEnvelope(e2ee, {
+            room,
+            userId: socket.userId,
+            deviceId: socket.data.deviceId,
+          });
+          room.encrypted = true;
+        } else if (e2ee) {
+          throw new ApiError(
+            400,
+            room.type === "private"
+              ? "The other person hasn't set up encryption yet"
+              : "Some members haven't set up encryption yet",
+          );
+        }
 
-      const plainTextPreview =
-        message.text ||
-        (media?.fileType?.startsWith("image/")
-          ? "📷 Photo"
-          : media?.fileName
-            ? `📎 ${media.fileName}`
-            : "📎 Attachment");
+        if (
+          !envelope &&
+          (!text || !text.trim()) &&
+          !media?.url &&
+          !poll?.question
+        ) {
+          throw new ApiError(400, "Message text, media, or poll is required");
+        }
 
-      room.lastMessage = {
-        messageId: message._id,
-        text: envelope ? "" : plainTextPreview,
-        sender: socket.userId,
-        createdAt: message.createdAt,
-        encrypted: message.encrypted,
-        e2ee: envelope ?? undefined,
-      };
-      await room.save();
+        // Recipients who are online right now have received it the instant it's
+        // broadcast => "delivered". Offline ones are marked later, when they
+        // reconnect (see presence.handler.js).
+        const otherIds = room.members
+          .map((m) => m.userId.toString())
+          .filter((id) => id !== socket.userId);
+        const deliveredTo = await getOnlineUserIds(io, otherIds);
 
-      const roomInfo = {
-        type: room.type,
-        name: room.name,
-        avatarUrl: room.groupAvatarUrl,
-      };
-
-      if (envelope) {
-        // Each member gets only their own locked keys.
-        const plain = message.toJSON();
-
-        emitToMembers(io, room, "message:new", (memberId) => ({
+        const message = await Message.create({
           roomId,
-          message: viewForUser(plain, memberId),
-          // Lets any page build a notification without already knowing the room.
-          room: roomInfo,
-        }));
-
-        callback?.({
-          success: true,
-          message: viewForUser(plain, socket.userId),
+          sender: socket.userId,
+          encrypted: Boolean(envelope),
+          text: envelope ? "" : (text?.trim() || ""),
+          ...(replyTo && !envelope && {
+            replyTo: {
+              messageId: replyTo.messageId,
+              senderName: replyTo.senderName || "",
+              text: replyTo.text || "",
+              mediaType: replyTo.mediaType || "",
+            },
+          }),
+          ...(media && !envelope && {
+            media: {
+              url: media.url,
+              publicId: media.publicId || "",
+              fileName: media.fileName || "",
+              fileType: media.fileType || "",
+              fileSize: Number(media.fileSize) || 0,
+            },
+          }),
+          ...(poll && {
+            poll: {
+              question: envelope ? "" : (poll.question?.trim() || ""),
+              options: (poll.options || []).map((o) => ({
+                id: o.id,
+                text: envelope ? "" : (o.text?.trim() || ""),
+              })),
+              allowMultipleAnswers: Boolean(poll.allowMultipleAnswers),
+              votes: [],
+            },
+          }),
+          ...(envelope && { e2ee: envelope }),
+          deliveredTo,
         });
-      } else {
-        io.to(roomId).emit("message:new", { roomId, message, room: roomInfo });
-        callback?.({ success: true, message });
-      }
+        await message.populate("sender", "name avatarUrl");
+        await message.populate("poll.votes.userId", "name avatarUrl");
 
-      // Per recipient device: push right away if the device is offline, or if
-      // it's connected but its page doesn't confirm in time. Not awaited, so a
-      // slow push service never delays the message itself.
-      notifyAboutMessage(io, { room, message, recipientIds: otherIds });
-    } catch (err) {
-      callback?.({ success: false, message: err.message });
-    }
-  });
+        room.members.forEach((member) => {
+          if (member.userId.toString() !== socket.userId) member.unreadCount += 1;
+        });
+
+        const plainTextPreview =
+          message.text ||
+          (poll?.question ? `📊 Poll: ${poll.question}` : "") ||
+          (media?.fileType?.startsWith("image/")
+            ? "📷 Photo"
+            : media?.fileName
+              ? `📎 ${media.fileName}`
+              : "📎 Attachment");
+
+        room.lastMessage = {
+          messageId: message._id,
+          text: envelope ? "" : plainTextPreview,
+          sender: socket.userId,
+          createdAt: message.createdAt,
+          encrypted: message.encrypted,
+          e2ee: envelope ?? undefined,
+        };
+        await room.save();
+
+        const roomInfo = {
+          type: room.type,
+          name: room.name,
+          avatarUrl: room.groupAvatarUrl,
+        };
+
+        if (envelope) {
+          // Each member gets only their own locked keys.
+          const plain = message.toJSON();
+
+          emitToMembers(io, room, "message:new", (memberId) => ({
+            roomId,
+            message: viewForUser(plain, memberId),
+            // Lets any page build a notification without already knowing the room.
+            room: roomInfo,
+          }));
+
+          callback?.({
+            success: true,
+            message: viewForUser(plain, socket.userId),
+          });
+        } else {
+          io.to(roomId).emit("message:new", { roomId, message, room: roomInfo });
+          callback?.({ success: true, message });
+        }
+
+        // Per recipient device: push right away if the device is offline, or if
+        // it's connected but its page doesn't confirm in time. Not awaited, so a
+        // slow push service never delays the message itself.
+        notifyAboutMessage(io, { room, message, recipientIds: otherIds });
+      } catch (err) {
+        callback?.({ success: false, message: err.message });
+      }
+    },
+  );
 
   // Fired when a user opens/is viewing a room: clears the unread badge AND
   // marks the messages as seen, which turns the sender's ticks blue.
@@ -335,6 +357,110 @@ function registerMessageHandlers(io, socket) {
     },
   );
 
+  // Poll voting handler
+  socket.on(
+    "message:poll-vote",
+    async ({ roomId, messageId, selectedOptionIds, vote }, callback) => {
+      try {
+        const room = await Room.findOne({
+          _id: roomId,
+          "members.userId": socket.userId,
+        });
+
+        if (!room) {
+          throw new ApiError(403, "You are not a member of this room");
+        }
+
+        const message = await Message.findOne({
+          _id: messageId,
+          roomId,
+          type: { $ne: "system" },
+        });
+
+        if (!message) {
+          throw new ApiError(404, "Message not found");
+        }
+
+        if (message.deletedAt) {
+          throw new ApiError(400, "Cannot vote on a deleted message");
+        }
+
+        if (!message.poll) {
+          throw new ApiError(400, "This message is not a poll");
+        }
+
+        if (!message.poll.votes) {
+          message.poll.votes = [];
+        }
+
+        const existingIndex = message.poll.votes.findIndex(
+          (v) => v.userId.toString() === socket.userId,
+        );
+
+        if (message.encrypted) {
+          if (!vote) {
+            throw new ApiError(400, "Encrypted vote required");
+          }
+          const validatedVote = validatePollVote(vote);
+
+          if (existingIndex !== -1) {
+            message.poll.votes[existingIndex].iv = validatedVote.iv;
+            message.poll.votes[existingIndex].ciphertext = validatedVote.ciphertext;
+            message.poll.votes[existingIndex].updatedAt = new Date();
+          } else {
+            message.poll.votes.push({
+              userId: socket.userId,
+              ...validatedVote,
+              updatedAt: new Date(),
+            });
+          }
+        } else {
+          if (!Array.isArray(selectedOptionIds)) {
+            throw new ApiError(400, "selectedOptionIds array required");
+          }
+
+          const validOptionIds = new Set(
+            message.poll.options.map((opt) => opt.id),
+          );
+          const cleanIds = selectedOptionIds.filter((id) =>
+            validOptionIds.has(id),
+          );
+
+          if (!message.poll.allowMultipleAnswers && cleanIds.length > 1) {
+            throw new ApiError(400, "Multiple options not allowed in this poll");
+          }
+
+          if (existingIndex !== -1) {
+            message.poll.votes[existingIndex].selectedOptionIds = cleanIds;
+            message.poll.votes[existingIndex].updatedAt = new Date();
+          } else {
+            message.poll.votes.push({
+              userId: socket.userId,
+              selectedOptionIds: cleanIds,
+              updatedAt: new Date(),
+            });
+          }
+        }
+
+        await message.save();
+        await message.populate("poll.votes.userId", "name avatarUrl");
+
+        io.to(roomId).emit("message:poll-vote-update", {
+          roomId,
+          messageId,
+          votes: message.poll.votes,
+        });
+
+        callback?.({ success: true });
+      } catch (err) {
+        callback?.({
+          success: false,
+          message: err.message,
+        });
+      }
+    },
+  );
+
   // Sender-only, within the edit window, and never on an already-deleted message.
   socket.on(
     "message:edit",
@@ -358,6 +484,10 @@ function registerMessageHandlers(io, socket) {
         }
         if (message.deletedAt)
           throw new ApiError(400, "Can't edit a deleted message");
+
+        if (message.poll) {
+          throw new ApiError(400, "Polls cannot be edited");
+        }
 
         const age = Date.now() - message.createdAt.getTime();
         if (age > EDIT_WINDOW_MS)
@@ -473,9 +603,9 @@ function registerMessageHandlers(io, socket) {
           throw new ApiError(400, "Message already deleted");
         }
 
-        // Permanently delete media attachment from Cloudinary if present
-        // (works for both encrypted raw blobs and plain media)
-        const publicIdToDelete = message.media?.publicId || mediaPublicId;
+        // Delete from Cloudinary if mediaPublicId provided (unencrypted media)
+        // or check message.media.publicId
+        const publicIdToDelete = mediaPublicId || message.media?.publicId;
         if (publicIdToDelete) {
           try {
             await deleteMediaFile(publicIdToDelete);
@@ -487,11 +617,12 @@ function registerMessageHandlers(io, socket) {
           }
         }
 
-        // Soft delete: clear all text, reactions, E2EE envelope, and media metadata
+        // Soft delete: clear all text, reactions, poll, E2EE envelope, and media metadata
         const DELETED_PREVIEW_TEXT = "This message was deleted";
 
         message.text = DELETED_PREVIEW_TEXT;
         message.reactions = [];
+        message.poll = undefined;
         message.e2ee = undefined; // ciphertext is removed along with the message
         message.media = {
           url: "",
@@ -505,29 +636,30 @@ function registerMessageHandlers(io, socket) {
 
         await message.save();
 
-      // Update room's last message preview if necessary
-      if (room.lastMessage?.messageId?.toString() === messageId) {
-        room.lastMessage.text = DELETED_PREVIEW_TEXT;
-        room.lastMessage.e2ee = undefined;
-        room.lastMessage.encrypted = false;
-        await room.save();
+        // Update room's last message preview if necessary
+        if (room.lastMessage?.messageId?.toString() === messageId) {
+          room.lastMessage.text = DELETED_PREVIEW_TEXT;
+          room.lastMessage.e2ee = undefined;
+          room.lastMessage.encrypted = false;
+          await room.save();
+        }
+
+        // Notify all users in the room
+        io.to(roomId).emit("message:deleted", {
+          roomId,
+          messageId,
+          deletedAt: message.deletedAt,
+        });
+
+        callback?.({ success: true });
+      } catch (err) {
+        callback?.({
+          success: false,
+          message: err.message,
+        });
       }
-
-      // Notify all users in the room
-      io.to(roomId).emit("message:deleted", {
-        roomId,
-        messageId,
-        deletedAt: message.deletedAt,
-      });
-
-      callback?.({ success: true });
-    } catch (err) {
-      callback?.({
-        success: false,
-        message: err.message,
-      });
-    }
-  });
+    },
+  );
 }
 
 export default registerMessageHandlers;

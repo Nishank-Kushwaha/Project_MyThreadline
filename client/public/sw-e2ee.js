@@ -157,7 +157,9 @@
           base64UrlToBytes(envelope.ciphertext),
         );
 
-        const text = JSON.parse(decoder.decode(plaintext))?.text;
+        const payload = JSON.parse(decoder.decode(plaintext));
+        if (payload?.poll?.question) return `📊 Poll: ${payload.poll.question}`;
+        const text = payload?.text;
         return typeof text === "string" && text ? text : null;
       } finally {
         messageKeyBytes.fill(0);

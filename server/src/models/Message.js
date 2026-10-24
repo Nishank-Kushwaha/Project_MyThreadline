@@ -17,7 +17,7 @@ const messageSchema = new Schema(
     text: {
       type: String,
       required: function () {
-        return !this.encrypted && !this.media?.url;
+        return !this.encrypted && !this.media?.url && !this.poll?.question;
       },
       trim: true,
       default: "",
@@ -31,6 +31,29 @@ const messageSchema = new Schema(
       fileName: { type: String, default: "" },
       fileType: { type: String, default: "" },
       fileSize: { type: Number, default: 0 },
+    },
+
+    // Poll message data
+    poll: {
+      question: { type: String, trim: true, default: "" },
+      options: [
+        {
+          _id: false,
+          id: { type: String, required: true },
+          text: { type: String, trim: true, default: "" },
+        },
+      ],
+      allowMultipleAnswers: { type: Boolean, default: false },
+      votes: [
+        {
+          _id: false,
+          userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+          selectedOptionIds: [{ type: String }],
+          iv: String,
+          ciphertext: String,
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
     },
 
     // True for an end-to-end encrypted message. Its contents are in `e2ee`.

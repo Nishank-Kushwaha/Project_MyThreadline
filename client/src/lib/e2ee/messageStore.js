@@ -64,6 +64,9 @@ export async function cacheDecryptedMessages(roomId, messages) {
         if (!m || !m._id) continue;
         const text = (m.text || "").trim();
         const fileName = (m.media?.fileName || "").trim();
+        const pollContent = m.poll
+          ? `${m.poll.question || ""} ${(m.poll.options || []).map((o) => o.text).join(" ")}`
+          : "";
 
         // Only store messages with searchable content
         store.put({
@@ -71,7 +74,7 @@ export async function cacheDecryptedMessages(roomId, messages) {
           roomId,
           text,
           fileName,
-          searchableText: `${text} ${fileName}`.toLowerCase(),
+          searchableText: `${text} ${fileName} ${pollContent}`.toLowerCase().trim(),
           senderName: m.sender?.name || "",
           createdAt: new Date(m.createdAt).getTime(),
           type: m.type || "user",
@@ -133,7 +136,7 @@ export async function searchLocalMessages(roomId, query, limit = 50) {
       };
     });
 
-    return results;
+  return results;
   } catch (err) {
     console.error("[messageStore] Search failed:", err);
     return [];

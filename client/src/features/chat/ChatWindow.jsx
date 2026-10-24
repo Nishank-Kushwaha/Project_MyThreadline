@@ -35,9 +35,11 @@ import {
 } from "@/lib/e2ee/directory";
 import {
   buildOutgoingMessage,
+  buildPollVoteRequest,
   buildReactionRequest,
   decryptMessage,
   decryptMessages,
+  decryptPollVotes,
   decryptReactions,
 } from "@/lib/e2ee/messages";
 import {
@@ -134,6 +136,7 @@ export function ChatWindow({
   const messagesRef = useRef([]); // latest messages, for use inside socket handlers
   messagesRef.current = messages;
   const reactionSeq = useRef({}); // messageId -> newest reaction update number
+  const pollVoteSeq = useRef({}); // messageId -> newest poll vote update number
 
   const recipientCount = room.memberCount - 1; // everyone except me
 
@@ -362,6 +365,41 @@ export function ChatWindow({
       );
     };
 
+    // A vote on a poll changed in this room. Sealed votes are decrypted here.
+    const handlePollVoteUpdate = async ({ roomId, messageId, votes }) => {
+      if (roomId !== room.id) return;
+
+      const target = messagesRef.current.find((m) => m._id === messageId);
+      if (!target) return;
+
+      const seq = (pollVoteSeq.current[messageId] =
+        (pollVoteSeq.current[messageId] ?? 0) + 1);
+
+      let shownVotes = votes;
+      if (target.secret) {
+        shownVotes = await decryptPollVotes(votes, {
+          secret: target.secret,
+          roomId: room.id,
+          messageId,
+        });
+      }
+
+      if (pollVoteSeq.current[messageId] !== seq) return;
+
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m._id !== messageId || !m.poll) return m;
+          return {
+            ...m,
+            poll: {
+              ...m.poll,
+              votes: shownVotes,
+            },
+          };
+        }),
+      );
+    };
+
     // Someone edited a message. A plaintext edit carries the new text; an
     // encrypted edit carries a new envelope that is decrypted here.
     const handleEdited = async ({
@@ -439,6 +477,7 @@ export function ChatWindow({
     socket.on("message:delivered", handleDelivered);
     socket.on("message:seen-update", handleSeenUpdate);
     socket.on("message:reaction-update", handleReactionUpdate);
+    socket.on("message:poll-vote-update", handlePollVoteUpdate);
     socket.on("message:edited", handleEdited);
     socket.on("message:deleted", handleDeleted);
     socket.on("message:system", handleSystemMessage);
@@ -448,6 +487,7 @@ export function ChatWindow({
       socket.off("message:delivered", handleDelivered);
       socket.off("message:seen-update", handleSeenUpdate);
       socket.off("message:reaction-update", handleReactionUpdate);
+      socket.off("message:poll-vote-update", handlePollVoteUpdate);
       socket.off("message:edited", handleEdited);
       socket.off("message:deleted", handleDeleted);
       socket.off("message:system", handleSystemMessage);
@@ -596,7 +636,7 @@ export function ChatWindow({
   };
 
   // Returns false when the message wasn't sent, so the input keeps the text.
-  const handleSend = async (text, file) => {
+  const handleSend = async (text, file, poll = null) => {
     if (!socket) return false;
     stopTyping();
     setSendError("");
@@ -651,6 +691,7 @@ export function ChatWindow({
           currentUser,
           text,
           media: mediaPayload,
+          poll,
           replyTo: replyingTo
             ? {
                 messageId: replyingTo.messageId,
@@ -745,6 +786,43 @@ export function ChatWindow({
       const errorMsg = err.message || "Couldn't save that reaction.";
       setSendError(errorMsg);
       toast.error(errorMsg);
+    }
+  };
+
+  const handlePollVote = async (messageId, selectedOptionIds) => {
+    if (!socket) return;
+
+    const message = messages.find((m) => m._id === messageId);
+    if (!message) return;
+
+    try {
+      const payload = await buildPollVoteRequest({
+        message,
+        selectedOptionIds,
+        roomId: room.id,
+        currentUserId: currentUser.id,
+      });
+
+      const ack = await new Promise((resolve) => {
+        socket
+          .timeout(10000)
+          .emit(
+            "message:poll-vote",
+            { roomId: room.id, messageId, ...payload },
+            (err, response) =>
+              resolve(
+                err
+                  ? { success: false, message: "No response from the server." }
+                  : response,
+              ),
+          );
+      });
+
+      if (!ack?.success) {
+        toast.error(ack?.message || "Couldn't record your vote.");
+      }
+    } catch (err) {
+      toast.error(err.message || "Couldn't record your vote.");
     }
   };
 
@@ -1290,6 +1368,7 @@ export function ChatWindow({
                             : encryption !== "active"
                         }
                         onReact={handleReact}
+                        onVote={handlePollVote}
                         onReply={(replyData) => setReplyingTo(replyData)}
                         onEdit={handleEditMessage}
                         onDelete={handleDeleteMessage}
