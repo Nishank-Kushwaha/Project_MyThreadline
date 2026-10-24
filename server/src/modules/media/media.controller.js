@@ -7,11 +7,19 @@ export async function uploadMedia(req, res, next) {
       throw new ApiError(400, "No file uploaded");
     }
 
+    // 100% E2EE enforcement: Chat media attachments must always be encrypted blobs
     const isEncrypted =
-      req.query.encrypted === "true" || req.body.isEncrypted === "true";
+      req.query.encrypted !== "false" && req.body.isEncrypted !== "false";
+
+    if (!isEncrypted) {
+      throw new ApiError(
+        400,
+        "Unencrypted media uploads are not allowed. Media must be encrypted client-side before upload.",
+      );
+    }
 
     const result = await mediaService.uploadMediaFile(req.file.buffer, {
-      isEncrypted,
+      isEncrypted: true,
       originalname: req.file.originalname,
       mimetype: req.file.mimetype,
     });

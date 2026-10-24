@@ -1,9 +1,6 @@
 import User from "../../models/User.js";
 import { sendToUser, getSubscribedDeviceIds } from "./push.service.js";
 
-// Longer text is truncated with an ellipsis.
-const MAX_BODY_LENGTH = 120;
-
 // How long the server waits for a device to confirm a message before assuming
 // its tab is frozen or suspended and sending a push to that device instead.
 const ACK_TIMEOUT_MS = 5000;
@@ -26,12 +23,6 @@ const ackKey = (userId, deviceId, messageId) =>
 // The service worker can only load absolute image URLs.
 function avatarFor(url) {
   return typeof url === "string" && /^https?:\/\//.test(url) ? url : undefined;
-}
-
-function trimText(text = "") {
-  return text.length > MAX_BODY_LENGTH
-    ? `${text.slice(0, MAX_BODY_LENGTH)}…`
-    : text;
 }
 
 // Adds the encrypted message to the push so the device's service worker can
@@ -160,18 +151,9 @@ async function pushNewMessage({ room, message, recipientIds, deviceIds }) {
         const { enabled, showPreview } = prefsFor(userId);
         if (!enabled) return;
 
-        // Plain (older) messages can show their text. Encrypted ones are
-        // unreadable here, so they start generic and may be upgraded below.
-        const text =
-          message.encrypted || !showPreview
-            ? "New message"
-            : trimText(
-                message.text ||
-                  (message.poll?.question ? `📊 Poll: ${message.poll.question}` : "") ||
-                  (message.media?.fileType?.startsWith("image/")
-                    ? "📷 Photo"
-                    : "📎 Attachment"),
-              );
+        // 100% E2EE: Server never possesses readable text. Fallback notification body is generic;
+        // recipient device service worker decrypts the actual message preview client-side.
+        const text = "New message";
 
         const base = {
           title: isGroup ? room.name : senderName,

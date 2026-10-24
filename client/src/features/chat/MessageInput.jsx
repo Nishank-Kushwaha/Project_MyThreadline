@@ -121,7 +121,7 @@ export function MessageInput({
   onCancelReply,
   droppedFile = null,
   onClearDroppedFile,
-  isEncrypted = false,
+  isEncrypted = true,
 }) {
   const [text, setText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);

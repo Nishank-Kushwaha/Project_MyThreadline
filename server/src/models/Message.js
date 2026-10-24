@@ -12,35 +12,25 @@ const messageSchema = new Schema(
     },
     sender: { type: Schema.Types.ObjectId, ref: "User", required: true },
 
-    // Empty for end-to-end encrypted messages: the readable text only ever
-    // exists on the devices.
+    // In 100% E2EE, readable user text only exists on client devices.
+    // Database text is only used for system messages (e.g. "Alice added Bob")
+    // and deleted message tombstones ("This message was deleted").
     text: {
       type: String,
       required: function () {
-        return !this.encrypted && !this.media?.url && !this.poll?.question;
+        return this.type === "system";
       },
       trim: true,
       default: "",
     },
 
-    // Unencrypted media attachments (used only in non-E2EE chats).
-    // In E2EE chats, all media metadata and keys are encrypted inside `e2ee`.
-    media: {
-      url: { type: String, default: "" },
-      publicId: { type: String, default: "" },
-      fileName: { type: String, default: "" },
-      fileType: { type: String, default: "" },
-      fileSize: { type: Number, default: 0 },
-    },
-
-    // Poll message data
+    // Poll message metadata & encrypted votes.
+    // Question and option labels are encrypted inside `e2ee`.
     poll: {
-      question: { type: String, trim: true, default: "" },
       options: [
         {
           _id: false,
           id: { type: String, required: true },
-          text: { type: String, trim: true, default: "" },
         },
       ],
       allowMultipleAnswers: { type: Boolean, default: false },
@@ -48,16 +38,15 @@ const messageSchema = new Schema(
         {
           _id: false,
           userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-          selectedOptionIds: [{ type: String }],
-          iv: String,
-          ciphertext: String,
+          iv: { type: String, required: true },
+          ciphertext: { type: String, required: true },
           updatedAt: { type: Date, default: Date.now },
         },
       ],
     },
 
     // True for an end-to-end encrypted message. Its contents are in `e2ee`.
-    encrypted: { type: Boolean, default: false },
+    encrypted: { type: Boolean, default: true },
     e2ee: {
       v: Number,
       senderDeviceId: String,
@@ -116,22 +105,13 @@ const messageSchema = new Schema(
     deliveredTo: [{ type: Schema.Types.ObjectId, ref: "User" }],
     seenBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
 
-    // One entry per user (never two for the same userId) — picking a new
-    // emoji replaces the old entry rather than adding a second one.
+    // One entry per user. Sealed (iv + ciphertext) so only people who can
+    // read the message can decrypt it.
     reactions: [
       {
         userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-        // Plain messages store the emoji itself. Encrypted messages store it
-        // sealed (iv + ciphertext): only people who can read the message can
-        // open it.
-        emoji: {
-          type: String,
-          required: function () {
-            return !this.ciphertext;
-          },
-        },
-        iv: String,
-        ciphertext: String,
+        iv: { type: String, required: true },
+        ciphertext: { type: String, required: true },
       },
     ],
 
@@ -145,17 +125,6 @@ const messageSchema = new Schema(
     // "deletedAt" is what the client checks to render the "This message was deleted" placeholder.
     deletedAt: {
       type: Date,
-      default: null,
-    },
-
-    // Quoted reply context (WhatsApp style)
-    replyTo: {
-      type: {
-        messageId: { type: Schema.Types.ObjectId, ref: "Message" },
-        senderName: { type: String, default: "" },
-        text: { type: String, default: "" },
-        mediaType: { type: String, default: "" },
-      },
       default: null,
     },
   },

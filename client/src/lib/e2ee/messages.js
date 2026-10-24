@@ -32,26 +32,18 @@ export async function buildOutgoingMessage({
 
   let info = await getRoomEncryption(room.id);
 
-  // The cached list may be a few seconds old: re-check before giving up.
+  // Re-check before giving up
   if (!hasAllKeys(info)) {
     info = await getRoomEncryption(room.id, { force: true });
   }
 
-  const mustEncrypt = info.encrypted || room.encrypted;
-
-  // Not everyone can read encrypted messages yet and the chat isn't locked in.
-  if (!hasAllKeys(info) && !mustEncrypt) {
-    return {
-      text: text || "",
-      ...(media && { media }),
-      ...(replyTo && { replyTo }),
-      ...(poll && { poll }),
-    };
-  }
-
-  // A private chat with a device-less person has nobody who could read it.
-  if (room.type === "private" && !hasAllKeys(info)) {
-    throw new Error("Encryption isn't available for this chat right now.");
+  // 100% E2EE enforcement: all members must have registered encryption keys
+  if (!hasAllKeys(info)) {
+    throw new Error(
+      room.type === "private"
+        ? "The other person hasn't registered a device key for end-to-end encryption yet."
+        : "Some group members haven't registered device keys for end-to-end encryption yet.",
+    );
   }
 
   const identity = await getIdentity(currentUser.id);
@@ -212,17 +204,13 @@ export async function decryptReactions(
   return opened.filter(Boolean);
 }
 
-// What to send for a reaction: { emoji } on a plain message (the server
-// toggles), or for an encrypted one either { remove: true } or
-// { reaction: { iv, ciphertext } }.
+// 100% E2EE: Reactions are always encrypted with the message secret
 export async function buildReactionRequest({
   message,
   emoji,
   roomId,
   currentUserId,
 }) {
-  if (!message.encrypted) return { emoji };
-
   if (!message.secret) {
     throw new Error("Reactions aren't available on this message.");
   }
@@ -279,17 +267,13 @@ export async function decryptPollVotes(
   return opened.filter(Boolean);
 }
 
-// What to send when voting on a poll
+// 100% E2EE: Poll votes are always encrypted with the poll's message secret
 export async function buildPollVoteRequest({
   message,
   selectedOptionIds = [],
   roomId,
   currentUserId,
 }) {
-  if (!message.encrypted) {
-    return { selectedOptionIds };
-  }
-
   if (!message.secret) {
     throw new Error("Voting is not available on this poll.");
   }

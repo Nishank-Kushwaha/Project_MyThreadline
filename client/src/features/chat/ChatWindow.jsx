@@ -645,44 +645,26 @@ export function ChatWindow({
       let mediaPayload = null;
 
       if (file) {
-        const isEncrypted = encryption === "active" || room.encrypted;
+        // 100% E2EE:
+        // 1. Encrypt file client-side using AES-GCM
+        const encrypted = await encryptMedia(file);
 
-        if (isEncrypted) {
-          // 1. Encrypt file client-side using AES-GCM
-          const encrypted = await encryptMedia(file);
+        // 2. Upload the encrypted binary blob to storage
+        const uploadRes = await uploadMediaRequest(encrypted.encryptedBlob, {
+          encrypted: true,
+          fileName: `${file.name}.enc`,
+        });
 
-          // 2. Upload the encrypted binary blob to storage
-          const uploadRes = await uploadMediaRequest(encrypted.encryptedBlob, {
-            encrypted: true,
-            fileName: `${file.name}.enc`,
-          });
-
-          // 3. Media payload to be packed INSIDE the E2EE envelope
-          mediaPayload = {
-            url: uploadRes.data.url,
-            publicId: uploadRes.data.publicId,
-            key: encrypted.mediaKey,
-            iv: encrypted.mediaIv,
-            fileName: encrypted.fileName,
-            fileType: encrypted.fileType,
-            fileSize: encrypted.fileSize,
-          };
-        } else {
-          // 1. Upload unencrypted file directly to storage
-          const uploadRes = await uploadMediaRequest(file, {
-            encrypted: false,
-            fileName: file.name,
-          });
-
-          // 2. Normal unencrypted media payload
-          mediaPayload = {
-            url: uploadRes.data.url,
-            publicId: uploadRes.data.publicId,
-            fileName: file.name,
-            fileType: file.type || "application/octet-stream",
-            fileSize: file.size,
-          };
-        }
+        // 3. Media payload to be packed INSIDE the E2EE envelope
+        mediaPayload = {
+          url: uploadRes.data.url,
+          publicId: uploadRes.data.publicId,
+          key: encrypted.mediaKey,
+          iv: encrypted.mediaIv,
+          fileName: encrypted.fileName,
+          fileType: encrypted.fileType,
+          fileSize: encrypted.fileSize,
+        };
       }
 
       const attempt = async () => {
@@ -832,18 +814,14 @@ export function ChatWindow({
     const original = messages.find((m) => m._id === messageId);
 
     try {
-      let payload = { text };
-
-      // An edit of an encrypted message is encrypted for every current device.
-      if (original?.encrypted) {
-        payload = await buildOutgoingMessage({
-          room,
-          currentUser,
-          text,
-          secret: original.secret ?? undefined,
-        });
-        if (!payload.e2ee) throw new Error("Couldn't encrypt that edit.");
-      }
+      // 100% E2EE: All edits must be encrypted for every current device.
+      const payload = await buildOutgoingMessage({
+        room,
+        currentUser,
+        text,
+        secret: original?.secret ?? undefined,
+      });
+      if (!payload.e2ee) throw new Error("Couldn't encrypt that edit.");
 
       const ack = await new Promise((resolve) => {
         socket
@@ -1139,7 +1117,10 @@ export function ChatWindow({
     else if (typingList.length === 1)
       typingText = `${typingList[0].name} is typing…`;
     else
-      typingText = `${typingList.slice(0, 2).map((u) => u.name).join(", ")}${typingList.length > 2 ? " and others" : ""} are typing…`;
+      typingText = `${typingList
+        .slice(0, 2)
+        .map((u) => u.name)
+        .join(", ")}${typingList.length > 2 ? " and others" : ""} are typing…`;
   }
 
   let subtitle;
@@ -1362,11 +1343,7 @@ export function ChatWindow({
                         isGroup={room.type === "group"}
                         recipientCount={recipientCount}
                         currentUserId={currentUser.id}
-                        editable={
-                          m.encrypted
-                            ? m.decrypt === "ok"
-                            : encryption !== "active"
-                        }
+                        editable={m.decrypt === "ok"}
                         onReact={handleReact}
                         onVote={handlePollVote}
                         onReply={(replyData) => setReplyingTo(replyData)}

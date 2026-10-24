@@ -6,7 +6,7 @@ const roomSchema = new Schema(
   {
     type: { type: String, enum: ["private", "group"], required: true },
     name: { type: String, trim: true }, // only used for "group" rooms
-    encrypted: { type: Boolean, default: false }, // Set once a private chat switches to end-to-end encryption. One-way: it never goes back to plaintext.
+    encrypted: { type: Boolean, default: true }, // 100% End-to-end encrypted room. Always true.
     createdBy: { type: Schema.Types.ObjectId, ref: "User", default: null }, // only used for "group" rooms
     groupAvatarUrl: { type: String, default: "" },
     groupAvatarPublicId: { type: String, default: "" },

@@ -51,57 +51,38 @@ function registerMessageHandlers(io, socket) {
         });
         if (!room) throw new ApiError(403, "You are not a member of this room");
 
-        // Chats are end-to-end encrypted once every member has a registered
-        // device key. From then on plaintext is refused, so a bug or an old
-        // client can't silently downgrade the chat.
-        let envelope = null;
-        const ready = await allMembersHaveDeviceKeys(room);
+        // 100% E2EE enforcement: All messages, media, replies, and polls must be encrypted.
+        if (!e2ee) {
+          throw new ApiError(400, "All messages must be end-to-end encrypted.");
+        }
 
-        if (room.encrypted || ready) {
-          if (!e2ee) {
-            throw new ApiError(
-              400,
-              "This chat is end-to-end encrypted. Reload the app and try again.",
-            );
-          }
-
-          // In E2EE chats, all media, reply, and sensitive poll details are sealed inside e2ee
-          if (media) {
-            throw new ApiError(
-              400,
-              "Unencrypted media is not allowed in an end-to-end encrypted chat.",
-            );
-          }
-          if (replyTo) {
-            throw new ApiError(
-              400,
-              "Unencrypted reply data is not allowed in an end-to-end encrypted chat.",
-            );
-          }
-
-          envelope = await validateEnvelope(e2ee, {
-            room,
-            userId: socket.userId,
-            deviceId: socket.data.deviceId,
-          });
-          room.encrypted = true;
-        } else if (e2ee) {
+        if (media) {
           throw new ApiError(
             400,
-            room.type === "private"
-              ? "The other person hasn't set up encryption yet"
-              : "Some members haven't set up encryption yet",
+            "Unencrypted media is not allowed. Media must be encrypted inside the E2EE envelope.",
           );
         }
 
-        if (
-          !envelope &&
-          (!text || !text.trim()) &&
-          !media?.url &&
-          !poll?.question
-        ) {
-          throw new ApiError(400, "Message text, media, or poll is required");
+        if (replyTo) {
+          throw new ApiError(
+            400,
+            "Unencrypted reply data is not allowed. Reply context must be encrypted inside the E2EE envelope.",
+          );
         }
+
+        if (text) {
+          throw new ApiError(
+            400,
+            "Plaintext messages are not allowed. Text must be encrypted inside the E2EE envelope.",
+          );
+        }
+
+        const envelope = await validateEnvelope(e2ee, {
+          room,
+          userId: socket.userId,
+          deviceId: socket.data.deviceId,
+        });
+        room.encrypted = true;
 
         // Recipients who are online right now have received it the instant it's
         // broadcast => "delivered". Offline ones are marked later, when they
@@ -114,62 +95,35 @@ function registerMessageHandlers(io, socket) {
         const message = await Message.create({
           roomId,
           sender: socket.userId,
-          encrypted: Boolean(envelope),
-          text: envelope ? "" : (text?.trim() || ""),
-          ...(replyTo && !envelope && {
-            replyTo: {
-              messageId: replyTo.messageId,
-              senderName: replyTo.senderName || "",
-              text: replyTo.text || "",
-              mediaType: replyTo.mediaType || "",
-            },
-          }),
-          ...(media && !envelope && {
-            media: {
-              url: media.url,
-              publicId: media.publicId || "",
-              fileName: media.fileName || "",
-              fileType: media.fileType || "",
-              fileSize: Number(media.fileSize) || 0,
-            },
-          }),
+          encrypted: true,
+          text: "",
           ...(poll && {
             poll: {
-              question: envelope ? "" : (poll.question?.trim() || ""),
               options: (poll.options || []).map((o) => ({
                 id: o.id,
-                text: envelope ? "" : (o.text?.trim() || ""),
               })),
               allowMultipleAnswers: Boolean(poll.allowMultipleAnswers),
               votes: [],
             },
           }),
-          ...(envelope && { e2ee: envelope }),
+          e2ee: envelope,
           deliveredTo,
         });
         await message.populate("sender", "name avatarUrl");
         await message.populate("poll.votes.userId", "name avatarUrl");
 
         room.members.forEach((member) => {
-          if (member.userId.toString() !== socket.userId) member.unreadCount += 1;
+          if (member.userId.toString() !== socket.userId)
+            member.unreadCount += 1;
         });
-
-        const plainTextPreview =
-          message.text ||
-          (poll?.question ? `📊 Poll: ${poll.question}` : "") ||
-          (media?.fileType?.startsWith("image/")
-            ? "📷 Photo"
-            : media?.fileName
-              ? `📎 ${media.fileName}`
-              : "📎 Attachment");
 
         room.lastMessage = {
           messageId: message._id,
-          text: envelope ? "" : plainTextPreview,
+          text: "",
           sender: socket.userId,
           createdAt: message.createdAt,
-          encrypted: message.encrypted,
-          e2ee: envelope ?? undefined,
+          encrypted: true,
+          e2ee: envelope,
         };
         await room.save();
 
@@ -179,25 +133,20 @@ function registerMessageHandlers(io, socket) {
           avatarUrl: room.groupAvatarUrl,
         };
 
-        if (envelope) {
-          // Each member gets only their own locked keys.
-          const plain = message.toJSON();
+        // Each member gets only their own locked keys.
+        const plain = message.toJSON();
 
-          emitToMembers(io, room, "message:new", (memberId) => ({
-            roomId,
-            message: viewForUser(plain, memberId),
-            // Lets any page build a notification without already knowing the room.
-            room: roomInfo,
-          }));
+        emitToMembers(io, room, "message:new", (memberId) => ({
+          roomId,
+          message: viewForUser(plain, memberId),
+          // Lets any page build a notification without already knowing the room.
+          room: roomInfo,
+        }));
 
-          callback?.({
-            success: true,
-            message: viewForUser(plain, socket.userId),
-          });
-        } else {
-          io.to(roomId).emit("message:new", { roomId, message, room: roomInfo });
-          callback?.({ success: true, message });
-        }
+        callback?.({
+          success: true,
+          message: viewForUser(plain, socket.userId),
+        });
 
         // Per recipient device: push right away if the device is offline, or if
         // it's connected but its page doesn't confirm in time. Not awaited, so a
@@ -260,11 +209,8 @@ function registerMessageHandlers(io, socket) {
     }
   });
 
-  // One reaction per user per message. On plain messages the server compares
-  // emoji (same again = remove, different = replace). On encrypted messages it
-  // can't read the emoji, so the client says what to do:
-  //   { reaction: { iv, ciphertext } }  set or replace mine
-  //   { remove: true }                  remove mine
+  // One reaction per user per message.
+  // 100% E2EE: Reactions are sealed (iv + ciphertext).
   socket.on(
     "message:react",
     async ({ roomId, messageId, emoji, reaction, remove }, callback) => {
@@ -292,48 +238,28 @@ function registerMessageHandlers(io, socket) {
           throw new ApiError(400, "Cannot react to a deleted message");
         }
 
+        if (emoji) {
+          throw new ApiError(
+            400,
+            "Plaintext reactions are not allowed. Reactions must be end-to-end encrypted.",
+          );
+        }
+
+        if (!remove && !reaction) {
+          throw new ApiError(400, "Encrypted reaction payload required");
+        }
+
         const existingIndex = message.reactions.findIndex(
           (r) => r.userId.toString() === socket.userId,
         );
 
-        if (message.encrypted) {
-          // A readable emoji here would defeat the point.
-          if (emoji) {
-            throw new ApiError(
-              400,
-              "Reactions on encrypted messages must be encrypted",
-            );
-          }
+        if (existingIndex !== -1) message.reactions.splice(existingIndex, 1);
 
-          if (existingIndex !== -1) message.reactions.splice(existingIndex, 1);
-
-          if (!remove) {
-            message.reactions.push({
-              userId: socket.userId,
-              ...validateReaction(reaction),
-            });
-          }
-        } else {
-          if (reaction) throw new ApiError(400, "This message isn't encrypted");
-
-          if (remove) {
-            if (existingIndex !== -1) {
-              message.reactions.splice(existingIndex, 1);
-            }
-          } else {
-            if (!emoji) throw new ApiError(400, "emoji is required");
-
-            if (
-              existingIndex !== -1 &&
-              message.reactions[existingIndex].emoji === emoji
-            ) {
-              message.reactions.splice(existingIndex, 1); // toggle off
-            } else if (existingIndex !== -1) {
-              message.reactions[existingIndex].emoji = emoji; // replace
-            } else {
-              message.reactions.push({ userId: socket.userId, emoji }); // add
-            }
-          }
+        if (!remove) {
+          message.reactions.push({
+            userId: socket.userId,
+            ...validateReaction(reaction),
+          });
         }
 
         await message.save();
@@ -357,7 +283,7 @@ function registerMessageHandlers(io, socket) {
     },
   );
 
-  // Poll voting handler
+  // Poll voting handler: 100% E2EE sealed vote (iv + ciphertext)
   socket.on(
     "message:poll-vote",
     async ({ roomId, messageId, selectedOptionIds, vote }, callback) => {
@@ -389,6 +315,17 @@ function registerMessageHandlers(io, socket) {
           throw new ApiError(400, "This message is not a poll");
         }
 
+        if (selectedOptionIds) {
+          throw new ApiError(
+            400,
+            "Plaintext poll votes are not allowed. Votes must be end-to-end encrypted.",
+          );
+        }
+
+        if (!vote) {
+          throw new ApiError(400, "Encrypted vote required");
+        }
+
         if (!message.poll.votes) {
           message.poll.votes = [];
         }
@@ -397,49 +334,19 @@ function registerMessageHandlers(io, socket) {
           (v) => v.userId.toString() === socket.userId,
         );
 
-        if (message.encrypted) {
-          if (!vote) {
-            throw new ApiError(400, "Encrypted vote required");
-          }
-          const validatedVote = validatePollVote(vote);
+        const validatedVote = validatePollVote(vote);
 
-          if (existingIndex !== -1) {
-            message.poll.votes[existingIndex].iv = validatedVote.iv;
-            message.poll.votes[existingIndex].ciphertext = validatedVote.ciphertext;
-            message.poll.votes[existingIndex].updatedAt = new Date();
-          } else {
-            message.poll.votes.push({
-              userId: socket.userId,
-              ...validatedVote,
-              updatedAt: new Date(),
-            });
-          }
+        if (existingIndex !== -1) {
+          message.poll.votes[existingIndex].iv = validatedVote.iv;
+          message.poll.votes[existingIndex].ciphertext =
+            validatedVote.ciphertext;
+          message.poll.votes[existingIndex].updatedAt = new Date();
         } else {
-          if (!Array.isArray(selectedOptionIds)) {
-            throw new ApiError(400, "selectedOptionIds array required");
-          }
-
-          const validOptionIds = new Set(
-            message.poll.options.map((opt) => opt.id),
-          );
-          const cleanIds = selectedOptionIds.filter((id) =>
-            validOptionIds.has(id),
-          );
-
-          if (!message.poll.allowMultipleAnswers && cleanIds.length > 1) {
-            throw new ApiError(400, "Multiple options not allowed in this poll");
-          }
-
-          if (existingIndex !== -1) {
-            message.poll.votes[existingIndex].selectedOptionIds = cleanIds;
-            message.poll.votes[existingIndex].updatedAt = new Date();
-          } else {
-            message.poll.votes.push({
-              userId: socket.userId,
-              selectedOptionIds: cleanIds,
-              updatedAt: new Date(),
-            });
-          }
+          message.poll.votes.push({
+            userId: socket.userId,
+            ...validatedVote,
+            updatedAt: new Date(),
+          });
         }
 
         await message.save();
@@ -462,6 +369,7 @@ function registerMessageHandlers(io, socket) {
   );
 
   // Sender-only, within the edit window, and never on an already-deleted message.
+  // 100% E2EE: Edits must always be encrypted with a new E2EE envelope.
   socket.on(
     "message:edit",
     async ({ roomId, messageId, text, e2ee }, callback) => {
@@ -493,54 +401,31 @@ function registerMessageHandlers(io, socket) {
         if (age > EDIT_WINDOW_MS)
           throw new ApiError(403, "This message is too old to edit");
 
-        let envelope = null;
-
-        if (message.encrypted) {
-          // The new version must be encrypted too: accepting plaintext here
-          // would put the edited text in the database, readable.
-          if (!e2ee) {
-            throw new ApiError(
-              400,
-              "Edits to encrypted messages must be encrypted",
-            );
-          }
-
-          envelope = await validateEnvelope(e2ee, {
-            room,
-            userId: socket.userId,
-            deviceId: socket.data.deviceId,
-          });
-
-          message.e2ee = envelope; // the old ciphertext is replaced
-        } else {
-          if (e2ee) throw new ApiError(400, "This message isn't encrypted");
-
-          // An old plaintext message can't be edited once the chat is
-          // encrypted, or its new text would be stored readable.
-          if (room.encrypted) {
-            throw new ApiError(
-              400,
-              "Messages sent before encryption was turned on can't be edited",
-            );
-          }
-
-          if (!text || !text.trim())
-            throw new ApiError(400, "Message text is required");
-
-          message.text = text.trim();
+        if (!e2ee) {
+          throw new ApiError(
+            400,
+            "All message edits must be end-to-end encrypted.",
+          );
         }
 
+        if (text) {
+          throw new ApiError(400, "Plaintext message edits are not allowed.");
+        }
+
+        const envelope = await validateEnvelope(e2ee, {
+          room,
+          userId: socket.userId,
+          deviceId: socket.data.deviceId,
+        });
+
+        message.e2ee = envelope; // the old ciphertext is replaced
         message.editedAt = new Date();
         await message.save();
 
         // If this was the room's preview message, keep the sidebar in sync too.
         if (room.lastMessage?.messageId?.toString() === messageId) {
-          if (envelope) {
-            room.lastMessage.e2ee = envelope;
-            room.markModified("lastMessage.e2ee");
-          } else {
-            room.lastMessage.text = message.text;
-          }
+          room.lastMessage.e2ee = envelope;
+          room.markModified("lastMessage.e2ee");
           await room.save();
         }
 
@@ -551,17 +436,10 @@ function registerMessageHandlers(io, socket) {
           editedAt: message.editedAt,
         };
 
-        if (envelope) {
-          emitToMembers(io, room, "message:edited", (memberId) => ({
-            ...edited,
-            e2ee: viewForUser({ e2ee: envelope }, memberId).e2ee,
-          }));
-        } else {
-          io.to(roomId).emit("message:edited", {
-            ...edited,
-            text: message.text,
-          });
-        }
+        emitToMembers(io, room, "message:edited", (memberId) => ({
+          ...edited,
+          e2ee: viewForUser({ e2ee: envelope }, memberId).e2ee,
+        }));
 
         callback?.({ success: true });
       } catch (err) {
@@ -603,12 +481,10 @@ function registerMessageHandlers(io, socket) {
           throw new ApiError(400, "Message already deleted");
         }
 
-        // Delete from Cloudinary if mediaPublicId provided (unencrypted media)
-        // or check message.media.publicId
-        const publicIdToDelete = mediaPublicId || message.media?.publicId;
-        if (publicIdToDelete) {
+        // Delete from Cloudinary if mediaPublicId provided (client sends decrypted publicId)
+        if (mediaPublicId) {
           try {
-            await deleteMediaFile(publicIdToDelete);
+            await deleteMediaFile(mediaPublicId);
           } catch (err) {
             console.error(
               "[socket] Failed to delete media from Cloudinary:",
@@ -617,21 +493,13 @@ function registerMessageHandlers(io, socket) {
           }
         }
 
-        // Soft delete: clear all text, reactions, poll, E2EE envelope, and media metadata
+        // Soft delete: clear all text, reactions, poll, and E2EE envelope
         const DELETED_PREVIEW_TEXT = "This message was deleted";
 
         message.text = DELETED_PREVIEW_TEXT;
         message.reactions = [];
         message.poll = undefined;
         message.e2ee = undefined; // ciphertext is removed along with the message
-        message.media = {
-          url: "",
-          publicId: "",
-          fileName: "",
-          fileType: "",
-          fileSize: 0,
-        };
-        message.replyTo = undefined;
         message.deletedAt = new Date();
 
         await message.save();

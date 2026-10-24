@@ -115,6 +115,16 @@ async function createPrivateRoom(userId, otherUserId) {
   if (userId === otherUserId)
     throw new ApiError(400, "Can't start a chat with yourself");
 
+  // Verify both users have device keys registered for 100% E2EE
+  const hasUserKey = await DeviceKey.exists({ userId });
+  const hasOtherKey = await DeviceKey.exists({ userId: otherUserId });
+  if (!hasUserKey || !hasOtherKey) {
+    throw new ApiError(
+      400,
+      "Both users must have registered device keys for end-to-end encryption",
+    );
+  }
+
   // Reuse the existing private room instead of creating duplicates.
   let room = await Room.findOne({
     type: "private",
@@ -124,6 +134,7 @@ async function createPrivateRoom(userId, otherUserId) {
   if (!room) {
     room = await Room.create({
       type: "private",
+      encrypted: true,
       members: [{ userId }, { userId: otherUserId }],
     });
   }
@@ -144,11 +155,24 @@ async function createGroupRoom(userId, name, memberIds = []) {
     );
   }
 
+  // Verify all members have device keys registered for 100% E2EE
+  const keys = await DeviceKey.find({ userId: { $in: uniqueMemberIds } }).select("userId");
+  const usersWithKeys = new Set(keys.map((k) => k.userId.toString()));
+  for (const mid of uniqueMemberIds) {
+    if (!usersWithKeys.has(mid.toString())) {
+      throw new ApiError(
+        400,
+        "All group members must have registered device keys for end-to-end encryption",
+      );
+    }
+  }
+
   const joinedAt = new Date();
 
   const room = await Room.create({
     type: "group",
     name: name.trim(),
+    encrypted: true,
     createdBy: userId,
     members: uniqueMemberIds.map((id) => ({
       userId: id,
@@ -188,15 +212,13 @@ async function addRoomMember(roomId, requesterId, newMemberId) {
 
   // Messages in an encrypted group are locked for each member's devices, so a
   // newcomer needs at least one or they could never read anything.
-  if (room.encrypted) {
-    const hasDevice = await DeviceKey.exists({ userId: newMemberId });
+  const hasDevice = await DeviceKey.exists({ userId: newMemberId });
 
-    if (!hasDevice) {
-      throw new ApiError(
-        409,
-        "That person hasn't set up encryption yet, so they can't join an encrypted group",
-      );
-    }
+  if (!hasDevice) {
+    throw new ApiError(
+      409,
+      "That person hasn't set up encryption yet, so they can't join an encrypted group",
+    );
   }
 
   const joinedAt = new Date();
