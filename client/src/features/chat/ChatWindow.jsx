@@ -15,7 +15,10 @@ import {
   Search,
   ChevronDown,
   UploadCloud,
+  Phone,
+  Video,
 } from "lucide-react";
+import { useCall } from "@/context/CallContext";
 import { getRoomMessagesRequest } from "@/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
@@ -80,6 +83,7 @@ export function ChatWindow({
   onOpenMembers,
 }) {
   const e2ee = useE2EE();
+  const { initiateCall } = useCall();
 
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1187,6 +1191,50 @@ export function ChatWindow({
           <p className="truncate text-sm font-semibold">{room.name}</p>
           <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
         </div>
+        {/* Voice & Video Call triggers for private 1-on-1 chats */}
+        {room.type === "private" && room.otherUserId && (
+          <>
+            <button
+              onClick={() =>
+                initiateCall({
+                  targetUserId: room.otherUserId,
+                  roomId: room.id,
+                  peerUser: {
+                    _id: room.otherUserId,
+                    name: room.name,
+                    avatarUrl: room.avatarUrl,
+                  },
+                  callType: "audio",
+                })
+              }
+              aria-label="Start voice call"
+              title="Voice call"
+              className="flex shrink-0 items-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition"
+            >
+              <Phone className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() =>
+                initiateCall({
+                  targetUserId: room.otherUserId,
+                  roomId: room.id,
+                  peerUser: {
+                    _id: room.otherUserId,
+                    name: room.name,
+                    avatarUrl: room.avatarUrl,
+                  },
+                  callType: "video",
+                })
+              }
+              aria-label="Start video call"
+              title="Video call"
+              className="flex shrink-0 items-center rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground transition"
+            >
+              <Video className="h-4 w-4" />
+            </button>
+          </>
+        )}
+
         {/* Search in chat button */}
         <button
           onClick={() => {
