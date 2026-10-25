@@ -220,6 +220,7 @@ export function useMediaDevices() {
 
     const cameraOn = cameraOk && original.enabled;
     notifyFn?.("video", cameraOn);
+    notifyFn?.("screen", false);
     setIsVideoDisabled(!cameraOn);
     originalVideoTrackRef.current = null;
     shareHandlersRef.current = { replaceTrackFn: null, notify: null };
@@ -267,6 +268,7 @@ export function useMediaDevices() {
         await replaceTrackFn(screenTrack);
       }
       notify?.("video", true);
+      notify?.("screen", true); // lets the viewer skip mirroring/cropping
 
       // User clicked the browser's "Stop sharing" banner
       screenTrack.onended = () => {

@@ -6,7 +6,7 @@ const RING_TIMEOUT_MS = 30000;
 const DISCONNECT_GRACE_MS = 10000; // survive brief network blips / socket reconnects
 const MAX_SDP_LENGTH = 100_000;
 const CALL_TYPES = new Set(["audio", "video"]);
-const MEDIA_KINDS = new Set(["audio", "video"]);
+const MEDIA_KINDS = new Set(["audio", "video", "screen"]);
 
 // NOTE: in-memory state => single server instance only.
 // For multiple instances use sticky sessions + the socket.io Redis adapter,

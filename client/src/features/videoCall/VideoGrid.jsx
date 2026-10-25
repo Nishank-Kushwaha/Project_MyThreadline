@@ -1,9 +1,16 @@
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useRef, useEffect, useMemo, useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
-import { MicOff, VideoOff } from "lucide-react";
+import { MicOff, VideoOff, Expand, Shrink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** Bind a stream to a <video> only if it changed, and force muted in code (React's `muted` prop is unreliable). */
+/**
+ * If the incoming video's shape is within this factor of the viewport's shape,
+ * we fill the viewport (crop at most ~15%). Otherwise we fit the WHOLE frame
+ * and fill the leftover space with a blurred copy of the video.
+ */
+const FILL_TOLERANCE = 1.2;
+
+/** Bind a stream to a <video> only if it changed, and force muted in code. */
 function useBindVideo(ref, stream, deps = []) {
   useEffect(() => {
     const el = ref.current;
@@ -14,6 +21,48 @@ function useBindVideo(ref, stream, deps = []) {
     if (stream) el.play().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream, ...deps]);
+}
+
+/** Real pixel size of the video being decoded (updates on rotation / source switch). */
+function useVideoDims(ref, stream, deps = []) {
+  const [dims, setDims] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => {
+      const w = el.videoWidth;
+      const h = el.videoHeight;
+      setDims((p) => (p.w === w && p.h === h ? p : { w, h }));
+    };
+    el.addEventListener("loadedmetadata", read);
+    el.addEventListener("resize", read);
+    el.addEventListener("playing", read);
+    read();
+    return () => {
+      el.removeEventListener("loadedmetadata", read);
+      el.removeEventListener("resize", read);
+      el.removeEventListener("playing", read);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stream, ...deps]);
+  return dims;
+}
+
+/** Size of the area the video is shown in (updates on window resize / rotation / minimize). */
+function useElementSize(ref) {
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = Math.round(entry.contentRect.width);
+      const h = Math.round(entry.contentRect.height);
+      setSize((p) => (p.w === w && p.h === h ? p : { w, h }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return size;
 }
 
 export function VideoGrid({
@@ -27,12 +76,15 @@ export function VideoGrid({
   peerMediaState,
   isScreenSharing = false,
   isMinimized = false,
+  mirrorRemote = true, // mirror the peer's CAMERA like your own preview (never a screen share)
 }) {
+  const containerRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const backdropRef = useRef(null);
+  const [fitOverride, setFitOverride] = useState(null); // null = auto | "fit" | "fill"
 
-  // VIDEO-ONLY streams: audio can never be played from these elements,
-  // so local mic audio can't loop back and remote audio isn't doubled.
+  // VIDEO-ONLY streams: audio can never be played from these elements.
   const localVideoStream = useMemo(
     () => (localStream ? new MediaStream(localStream.getVideoTracks()) : null),
     [localStream],
@@ -42,11 +94,6 @@ export function VideoGrid({
       remoteStream ? new MediaStream(remoteStream.getVideoTracks()) : null,
     [remoteStream],
   );
-
-  useBindVideo(localVideoRef, localVideoStream, [isVideoDisabled, isMinimized]);
-  useBindVideo(remoteVideoRef, remoteVideoStream, [
-    peerMediaState.isVideoDisabled,
-  ]);
 
   const hasRemoteVideo =
     callType === "video" &&
@@ -64,9 +111,80 @@ export function VideoGrid({
       .getVideoTracks()
       .some((t) => t.readyState === "live" && t.enabled);
 
+  const peerIsSharingScreen = Boolean(peerMediaState.isScreenSharing);
+
+  // ---- measurements -------------------------------------------------------
+  useBindVideo(remoteVideoRef, remoteVideoStream, [
+    peerMediaState.isVideoDisabled,
+  ]);
+  const remoteDims = useVideoDims(remoteVideoRef, remoteVideoStream);
+  const viewport = useElementSize(containerRef);
+
+  useBindVideo(localVideoRef, localVideoStream, [isVideoDisabled, isMinimized]);
+  const localDims = useVideoDims(localVideoRef, localVideoStream, [
+    isMinimized,
+  ]);
+
+  // New source type (camera <-> screen) -> go back to automatic layout
+  useEffect(() => setFitOverride(null), [peerIsSharingScreen]);
+
+  // ---- decide how to show the remote video --------------------------------
+  const known =
+    remoteDims.w > 0 && remoteDims.h > 0 && viewport.w > 0 && viewport.h > 0;
+
+  let autoMode = "fit"; // safest default: show the whole frame
+  if (known && !peerIsSharingScreen) {
+    const src = remoteDims.w / remoteDims.h;
+    const view = viewport.w / viewport.h;
+    const gap = Math.max(src / view, view / src);
+    autoMode = gap <= FILL_TOLERANCE ? "fill" : "fit";
+  }
+  // Screen shares are never cropped automatically (text must stay readable)
+  const mode = fitOverride ?? autoMode;
+
+  const mirrorRemoteVideo = mirrorRemote && !peerIsSharingScreen;
+  // Blurred backdrop only for camera video that is letterboxed
+  const showBackdrop =
+    Boolean(hasRemoteVideo) && mode === "fit" && !peerIsSharingScreen;
+
+  useBindVideo(backdropRef, showBackdrop ? remoteVideoStream : null, [
+    showBackdrop,
+  ]);
+
+  const toggleFit = () => setFitOverride(mode === "fit" ? "fill" : "fit");
+
+  // ---- local preview shape follows the local camera / screen shape --------
+  const localAspect =
+    hasLocalVideo && localDims.w > 0 && localDims.h > 0
+      ? localDims.w / localDims.h
+      : 3 / 4;
+  const pipWidth =
+    localAspect >= 1
+      ? "clamp(8.5rem, 20vw, 13rem)"
+      : "clamp(5.5rem, 12vw, 8.5rem)";
+
   return (
-    <div className="relative h-full w-full overflow-hidden bg-zinc-950 flex items-center justify-center">
+    <div
+      ref={containerRef}
+      onDoubleClick={isMinimized ? undefined : toggleFit}
+      className="relative h-full w-full overflow-hidden bg-zinc-950 flex items-center justify-center"
+    >
       {/* Remote audio is played by <RemoteAudio/> (mounted in CallProvider), not here. */}
+
+      {/* 0. BLURRED BACKDROP (fills the bars around a letterboxed camera video) */}
+      {showBackdrop && (
+        <video
+          ref={backdropRef}
+          autoPlay
+          playsInline
+          muted
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60 blur-2xl",
+            mirrorRemoteVideo ? "-scale-x-110 scale-y-110" : "scale-110",
+          )}
+        />
+      )}
 
       {/* 1. REMOTE FEED */}
       <video
@@ -75,7 +193,9 @@ export function VideoGrid({
         playsInline
         muted
         className={cn(
-          "h-full w-full object-cover",
+          "relative z-10 h-full w-full",
+          mode === "fill" ? "object-cover" : "object-contain",
+          mirrorRemoteVideo && "scale-x-[-1]",
           !hasRemoteVideo && "hidden",
         )}
       />
@@ -105,17 +225,43 @@ export function VideoGrid({
         </div>
       )}
 
-      {/* 2. LOCAL FEED (picture-in-picture) */}
+      {/* 2. FIT / FILL TOGGLE (also: double-click the video) */}
+      {hasRemoteVideo && !isMinimized && (
+        <button
+          type="button"
+          onClick={toggleFit}
+          aria-label={mode === "fit" ? "Fill screen" : "Fit to screen"}
+          title={mode === "fit" ? "Fill screen" : "Fit to screen"}
+          className="absolute left-4 top-20 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition hover:bg-black/70"
+        >
+          {mode === "fit" ? (
+            <Expand className="h-4 w-4" />
+          ) : (
+            <Shrink className="h-4 w-4" />
+          )}
+        </button>
+      )}
+
+      {/* 3. LOCAL FEED (picture-in-picture, shaped like your own camera / screen) */}
       {!isMinimized && callType === "video" && (
-        <div className="absolute right-4 top-4 z-20 h-40 w-28 sm:h-48 sm:w-36 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl">
+        <div
+          style={{
+            aspectRatio: String(localAspect),
+            width: pipWidth,
+            maxHeight: "35vh",
+          }}
+          className="absolute right-4 top-4 z-20 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl"
+        >
           <video
             ref={localVideoRef}
             autoPlay
             playsInline
             muted
             className={cn(
-              "h-full w-full object-cover",
-              !isScreenSharing && "scale-x-[-1]",
+              "h-full w-full",
+              isScreenSharing
+                ? "bg-black object-contain"
+                : "object-cover scale-x-[-1]",
               !hasLocalVideo && "hidden",
             )}
           />

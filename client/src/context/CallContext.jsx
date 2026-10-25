@@ -32,6 +32,7 @@ export function CallProvider({ children }) {
   const [peerMediaState, setPeerMediaState] = useState({
     isAudioMuted: false,
     isVideoDisabled: false,
+    isScreenSharing: false,
   });
 
   // Source of truth for event handlers (updated synchronously, never stale)
@@ -146,7 +147,11 @@ export function CallProvider({ children }) {
     setIsCaller(false);
     setDuration(0);
     setIsMinimized(false);
-    setPeerMediaState({ isAudioMuted: false, isVideoDisabled: false });
+    setPeerMediaState({
+      isAudioMuted: false,
+      isVideoDisabled: false,
+      isScreenSharing: false,
+    });
   }, [closeConnection, stopAllMedia, stopSound]);
 
   // ==========================================
@@ -463,10 +468,14 @@ export function CallProvider({ children }) {
 
     const onPeerMediaToggleEvent = ({ callId: id, kind, enabled }) => {
       if (!isCurrent(id)) return;
-      setPeerMediaState((prev) => ({
-        ...prev,
-        [kind === "audio" ? "isAudioMuted" : "isVideoDisabled"]: !enabled,
-      }));
+      setPeerMediaState((prev) => {
+        if (kind === "screen")
+          return { ...prev, isScreenSharing: Boolean(enabled) };
+        return {
+          ...prev,
+          [kind === "audio" ? "isAudioMuted" : "isVideoDisabled"]: !enabled,
+        };
+      });
     };
 
     const handlers = {
