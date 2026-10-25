@@ -70,6 +70,141 @@ function useElementSize(ref) {
   return size;
 }
 
+/**
+ * Animation engine shared by the speaking ring and the level bars.
+ *
+ * Turns the raw audio level into two eased signals and calls `onFrame` every
+ * frame ONLY while something is visible, then stops its own loop:
+ *   presence : 0..1  "is this person talking"  (fast fade in, slower fade out)
+ *   level    : 0..1  loudness (quick attack, slow release; square-root curve so
+ *                    soft voices still register and loud ones do not blow out)
+ * Time-based easing keeps it identical on 60 Hz and 120 Hz screens.
+ * With "reduce motion" enabled the level stays steady instead of reacting.
+ */
+function useLevelAnimation(active, levelRef, onFrame) {
+  const stateRef = useRef({ presence: 0, level: 0 });
+  const frameRef = useRef(onFrame);
+  frameRef.current = onFrame;
+
+  useEffect(() => {
+    const reduced =
+      typeof window !== "undefined" &&
+      Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+    const st = stateRef.current;
+    let raf = 0;
+    let last = performance.now();
+
+    const ease = (current, target, dt, attackMs, releaseMs) =>
+      current +
+      (target - current) *
+        (1 - Math.exp(-dt / (target > current ? attackMs : releaseMs)));
+
+    const tick = (now) => {
+      const dt = Math.min(64, now - last);
+      last = now;
+
+      const presenceTarget = active ? 1 : 0;
+      const levelTarget = !active
+        ? 0
+        : reduced
+          ? 0.5
+          : Math.sqrt(levelRef?.current ?? 0);
+
+      st.presence = ease(st.presence, presenceTarget, dt, 90, 300);
+      st.level = ease(st.level, levelTarget, dt, 60, 220);
+
+      const settled = !active && st.presence < 0.01 && st.level < 0.01;
+      if (settled) {
+        st.presence = 0;
+        st.level = 0;
+      }
+
+      frameRef.current({
+        presence: st.presence,
+        level: st.level,
+        t: now,
+        reduced,
+      });
+      if (!settled) raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [active, levelRef]);
+}
+
+/**
+ * Speaking indicator: a crisp thin ring that fades in when the person talks,
+ * with a soft halo that swells gently with their volume.
+ * Restrained on purpose (2px line, low-alpha halo), no neon.
+ */
+function SpeakingRing({ active, levelRef, inset = false, className }) {
+  const ref = useRef(null);
+
+  useLevelAnimation(active, levelRef, ({ presence, level }) => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.opacity = presence.toFixed(3);
+    const blur = 6 + level * 14;
+    const alpha = 0.1 + level * 0.18;
+    el.style.boxShadow = `${inset ? "inset " : ""}0 0 ${blur.toFixed(1)}px 0 rgba(52, 211, 153, ${alpha.toFixed(3)})`;
+  });
+
+  return (
+    <div
+      ref={ref}
+      aria-hidden="true"
+      className={cn(
+        "pointer-events-none absolute border-2 border-emerald-400/90 opacity-0",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * Tiny three-bar voice meter (like Meet / Teams). Takes no space when silent
+ * and slides open smoothly when the person speaks.
+ */
+function LevelBars({ active, levelRef, className }) {
+  const barsRef = useRef([]);
+  const weights = [0.75, 1, 0.85];
+
+  useLevelAnimation(active, levelRef, ({ level, t, reduced }) => {
+    barsRef.current.forEach((el, i) => {
+      if (!el) return;
+      const wobble = reduced
+        ? 0
+        : 0.12 * Math.sin(t / (110 + i * 40) + i * 1.7) * level;
+      const h =
+        0.22 + Math.min(1, Math.max(0, level * weights[i] + wobble)) * 0.78;
+      el.style.transform = `scaleY(${h.toFixed(3)})`;
+    });
+  });
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex h-3.5 items-center gap-0.5 overflow-hidden transition-[width,opacity,margin] duration-200 ease-out",
+        active ? "ml-1.5 w-3.25 opacity-100" : "ml-0 w-0 opacity-0",
+        className,
+      )}
+    >
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          ref={(el) => {
+            barsRef.current[i] = el;
+          }}
+          className="h-full w-0.75 origin-center rounded-full bg-emerald-400"
+          style={{ transform: "scaleY(0.22)" }}
+        />
+      ))}
+    </span>
+  );
+}
+
 export function VideoGrid({
   localStream,
   remoteStream,
@@ -82,6 +217,10 @@ export function VideoGrid({
   isScreenSharing = false,
   isMinimized = false,
   mirrorRemote = true, // mirror the peer's CAMERA like your own preview (never a screen share)
+  peerSpeaking = false,
+  peerLevelRef = null,
+  selfSpeaking = false,
+  selfLevelRef = null,
 }) {
   const containerRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -117,6 +256,8 @@ export function VideoGrid({
       .some((t) => t.readyState === "live" && t.enabled);
 
   const peerIsSharingScreen = Boolean(peerMediaState.isScreenSharing);
+  const speaking = Boolean(peerSpeaking) && !peerMediaState.isAudioMuted;
+  const selfActive = Boolean(selfSpeaking) && !isAudioMuted;
 
   // ---- measurements -------------------------------------------------------
   useBindVideo(remoteVideoRef, remoteVideoStream, [
@@ -251,6 +392,12 @@ export function VideoGrid({
               mirrorRemoteVideo && "scale-x-[-1]",
             )}
           />
+          <SpeakingRing
+            active={speaking}
+            levelRef={peerLevelRef}
+            inset
+            className="inset-0 rounded-[inherit]"
+          />
         </div>
       </div>
 
@@ -262,18 +409,23 @@ export function VideoGrid({
           )}
         >
           <div className="relative">
-            <div
-              className={cn(
-                "absolute animate-ping rounded-full bg-primary/20 opacity-40",
-                isMinimized ? "-inset-2" : "-inset-4",
-              )}
-            />
-            <div
-              className={cn(
-                "absolute animate-pulse rounded-full bg-primary/10 opacity-30",
-                isMinimized ? "-inset-4" : "-inset-8",
-              )}
-            />
+            {/* Gentle ripple only while we are still waiting for the other side's media */}
+            {!remoteStream && (
+              <>
+                <div
+                  className={cn(
+                    "absolute animate-ping rounded-full bg-primary/20 opacity-40",
+                    isMinimized ? "-inset-2" : "-inset-4",
+                  )}
+                />
+                <div
+                  className={cn(
+                    "absolute animate-pulse rounded-full bg-primary/10 opacity-30",
+                    isMinimized ? "-inset-4" : "-inset-8",
+                  )}
+                />
+              </>
+            )}
             <Avatar
               src={peer?.avatarUrl}
               name={peer?.name}
@@ -284,12 +436,23 @@ export function VideoGrid({
                   : "h-28 w-28 text-3xl ring-4",
               )}
             />
+            <SpeakingRing
+              active={speaking}
+              levelRef={peerLevelRef}
+              className={cn(
+                "rounded-full",
+                isMinimized ? "-inset-1.5" : "-inset-2",
+              )}
+            />
           </div>
           <div className="space-y-1">
             {!isMinimized && (
-              <h3 className="text-xl font-semibold text-white tracking-tight">
-                {peer?.name || "Participant"}
-              </h3>
+              <div className="flex items-center justify-center">
+                <h3 className="text-xl font-semibold text-white tracking-tight">
+                  {peer?.name || "Participant"}
+                </h3>
+                <LevelBars active={speaking} levelRef={peerLevelRef} />
+              </div>
             )}
             {peerMediaState.isAudioMuted && (
               <p className="flex items-center justify-center gap-1.5 text-xs text-red-400">
@@ -361,7 +524,19 @@ export function VideoGrid({
           <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-md">
             <span>You</span>
             {isAudioMuted && <MicOff className="h-2.5 w-2.5 text-red-400" />}
+            <LevelBars
+              active={selfActive}
+              levelRef={selfLevelRef}
+              className="h-2.5"
+            />
           </div>
+
+          <SpeakingRing
+            active={selfActive}
+            levelRef={selfLevelRef}
+            inset
+            className="inset-0 rounded-[inherit]"
+          />
         </div>
       )}
     </div>

@@ -220,6 +220,10 @@ export function CallModal() {
     peerMediaState,
     connectionState,
     networkQuality,
+    peerSpeaking,
+    peerLevelRef,
+    selfSpeaking,
+    selfLevelRef,
     cancelCall,
     endCall,
     toggleMic,
@@ -254,6 +258,10 @@ export function CallModal() {
             peerMediaState={peerMediaState}
             isScreenSharing={isScreenSharing}
             isMinimized={true}
+            peerSpeaking={peerSpeaking}
+            peerLevelRef={peerLevelRef}
+            selfSpeaking={selfSpeaking}
+            selfLevelRef={selfLevelRef}
           />
 
           {/* Quick Expand Button */}
@@ -298,7 +306,7 @@ export function CallModal() {
           </div>
 
           {/* Mini name + end-call bar: overlays the video, ~90% transparent */}
-          <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-transparent px-3 py-2">
+          <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-black/10 px-3 py-2">
             <span className="truncate text-xs font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
               {peer?.name}
             </span>
@@ -380,6 +388,10 @@ export function CallModal() {
           peerMediaState={peerMediaState}
           isScreenSharing={isScreenSharing}
           isMinimized={false}
+          peerSpeaking={peerSpeaking}
+          peerLevelRef={peerLevelRef}
+          selfSpeaking={selfSpeaking}
+          selfLevelRef={selfLevelRef}
         />
 
         {/* Connecting / Reconnecting pill over the video */}

@@ -12,6 +12,7 @@ import { useMediaDevices } from "@/features/videoCall/hooks/useMediaDevices";
 import { useWebRTC } from "@/features/videoCall/hooks/useWebRTC";
 import { useCallSound } from "@/features/videoCall/hooks/useCallSound";
 import { RemoteAudio } from "@/features/videoCall/RemoteAudio";
+import { useSpeakingDetector } from "@/features/videoCall/hooks/useSpeakingDetector";
 
 const CallContext = createContext(null);
 
@@ -109,6 +110,13 @@ export function CallProvider({ children }) {
     replaceVideoTrack,
     closeConnection,
   } = webrtc;
+
+  // Is the other person talking? (real loudness from their audio stream)
+  const { isSpeaking: peerSpeaking, levelRef: peerLevelRef } =
+    useSpeakingDetector(remoteStream);
+  // ...and are you? (your own mic; a muted mic is silent, so it never lights up)
+  const { isSpeaking: selfSpeaking, levelRef: selfLevelRef } =
+    useSpeakingDetector(localStream);
 
   // Backup sync from state
   useEffect(() => {
@@ -514,6 +522,10 @@ export function CallProvider({ children }) {
     remoteStream,
     connectionState,
     networkQuality,
+    peerSpeaking,
+    peerLevelRef,
+    selfSpeaking,
+    selfLevelRef,
     isAudioMuted,
     isVideoDisabled,
     isScreenSharing,
