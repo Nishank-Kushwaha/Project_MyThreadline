@@ -20,8 +20,15 @@
    - [Safety Numbers & QR Code Verification](#safety-numbers--qr-code-verification)
    - [PWA Service Worker Background Decryption](#pwa-service-worker-background-decryption)
    - [Encrypted Key Backup & Recovery](#encrypted-key-backup--recovery)
-6. [Tech Stack](#-tech-stack)
-7. [Getting Started](#-getting-started)
+6. [1-on-1 Voice, Video & Screen Sharing Architecture (WebRTC)](#-1-on-1-voice-video--screen-sharing-architecture-webrtc)
+   - [Signaling & Session Lifecycle](#signaling--session-lifecycle)
+   - [STUN/TURN & Metered.ca ICE Configuration](#stunturn--meteredca-ice-configuration)
+   - [WebRTC Media Engine & Opus Audio Tuning](#webrtc-media-engine--opus-audio-tuning)
+   - [Adaptive Network Quality & Auto-Degradation](#adaptive-network-quality--auto-degradation)
+   - [Intelligent Auto-Layout & Aspect Ratio Engine](#intelligent-auto-layout--aspect-ratio-engine)
+   - [Race-Condition Proof State Machine & Audio Isolation](#race-condition-proof-state-machine--audio-isolation)
+7. [Tech Stack](#-tech-stack)
+8. [Getting Started](#-getting-started)
 
 ---
 
@@ -35,6 +42,8 @@ The server operates strictly as an **untrusted, zero-knowledge relay and storage
 
 ## 🚀 Key Application Features
 
+* **📹 1-on-1 Voice, Video & Screen Sharing (WebRTC):**
+  Zero-lag peer-to-peer audio and video calls encrypted via DTLS-SRTP. Powered by dynamic Metered.ca TURN & Google STUN fallback, Opus audio tuning with in-band FEC, real-time adaptive quality scaling (good/fair/poor), screen sharing with detail preservation, ambient blurred backdrops, and an isolated audio playback pipeline that prevents cutouts.
 * **🔒 Zero-Knowledge End-to-End Encryption (E2EE):**
   ECDH P-256 key agreement with HKDF-SHA256 and AES-GCM-256 envelope encryption. Plaintext never touches the database or network in cleartext.
 * **💬 Real-Time Messaging & Sockets:**
@@ -76,6 +85,7 @@ Project/
 │   ├── src/
 │   │   ├── api/                             # Axios REST API clients
 │   │   │   ├── authApi.js                   # Authentication & profile endpoints
+│   │   │   ├── callsApi.js                  # Dynamic ICE / TURN server credentials endpoint
 │   │   │   ├── keysApi.js                   # Public device key directory endpoints
 │   │   │   ├── mediaApi.js                  # Encrypted/unencrypted media upload endpoints
 │   │   │   ├── pushApi.js                   # Web Push subscription registration
@@ -85,6 +95,7 @@ Project/
 │   │   │   └── ui/                          # Avatar, Button, Dialog, Input, Toasts, etc.
 │   │   ├── context/                         # React context providers
 │   │   │   ├── AuthContext.jsx              # Global authenticated user state
+│   │   │   ├── CallContext.jsx              # WebRTC call state machine & signaling coordinator
 │   │   │   ├── SocketContext.jsx            # Socket.io connection lifecycle manager
 │   │   │   └── ThemeContext.jsx             # Color theme manager
 │   │   ├── features/                        # Core application feature modules
@@ -107,11 +118,23 @@ Project/
 │   │   │   │   ├── RoomList.jsx             # Left sidebar conversation list
 │   │   │   │   ├── TypingIndicator.jsx      # Real-time typing bubble
 │   │   │   │   └── VoiceRecorder.jsx        # Voice note recording interface
-│   │   │   └── e2ee/                        # E2EE security UI & components
-│   │   │       ├── BackupSettings.jsx       # Passphrase backup / restore UI
-│   │   │       ├── E2EEContext.jsx          # Device key initialization & room encryption state
-│   │   │       ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
-│   │   │       └── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
+│   │   │   ├── e2ee/                        # E2EE security UI & components
+│   │   │   │   ├── BackupSettings.jsx       # Passphrase backup / restore UI
+│   │   │   │   ├── E2EEContext.jsx          # Device key initialization & room encryption state
+│   │   │   │   ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
+│   │   │   │   └── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
+│   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing module
+│   │   │       ├── CallControls.jsx         # Floating call action bar (mic, camera, share, hangup)
+│   │   │       ├── CallModal.jsx            # Fullscreen viewport, status badges & PiP container
+│   │   │       ├── IncomingCallDialog.jsx   # Radar glow incoming call modal with auto-decline
+│   │   │       ├── RemoteAudio.jsx          # Provider-level dedicated audio element (echo/dropout-free)
+│   │   │       ├── VideoGrid.jsx            # Auto-layout viewport (Aspect math, Fit/Fill & blurred backdrop)
+│   │   │       ├── hooks/                   # Calling hooks
+│   │   │       │   ├── useCallSound.js      # Ringtone, ringback & end call tone synthesis
+│   │   │       │   ├── useMediaDevices.js   # Camera/mic permissions, mobile constraints & screen share
+│   │   │       │   └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & ICE restart
+│   │   │       └── utils/
+│   │   │           └── callErrors.js        # User-friendly media device error formatter
 │   │   ├── lib/                             # Utility helpers & cryptographic engine
 │   │   │   ├── e2ee/                        # Web Crypto E2EE Engine
 │   │   │   │   ├── backup.js                # PBKDF2/AES-GCM key backup export & import
@@ -151,6 +174,7 @@ Project/
         │   └── User.js                      # User profile, credentials & settings
         ├── modules/                         # Feature domain modules (Controller, Routes, Service)
         │   ├── auth/                        # Registration, login, logout, OAuth
+        │   ├── calls/                       # Dynamic Metered.ca TURN & Google STUN endpoints
         │   ├── keys/                        # Device key registration & directory lookup
         │   ├── media/                       # Cloudinary upload endpoints
         │   ├── messages/                    # Message retrieval & E2EE envelope validation
@@ -162,6 +186,7 @@ Project/
         │   └── users/                       # Profile updates & user search
         ├── sockets/                         # Real-Time WebSocket Architecture
         │   ├── handlers/                    # Socket event handlers
+        │   │   ├── call.handler.js          # WebRTC P2P signaling, ICE relay & busy/timeout state
         │   │   ├── message.handler.js       # `message:send`, `message:react`, `message:poll-vote`, `message:delete`
         │   │   ├── presence.handler.js      # Online/offline presence & delivery ticks
         │   │   ├── room.handler.js          # Join room & room updates
@@ -372,12 +397,100 @@ Users can create an encrypted backup of their device keys to restore conversatio
 
 ---
 
+## 📹 1-on-1 Voice, Video & Screen Sharing Architecture (WebRTC)
+
+Threadline implements peer-to-peer Voice, Video, and Screen Sharing calls using browser-native **WebRTC** secured with **DTLS-SRTP** encryption. Media flows directly between participants with zero cleartext access by the server.
+
+```
+                       ┌─────────────────────────┐
+                       │   Metered.ca / STUN     │
+                       │ (Dynamic ICE Discovery) │
+                       └────────────▲────────────┘
+                                    │ /api/calls/ice-servers
+                                    │
+┌──────────────────┐         ┌──────┴──────┐         ┌──────────────────┐
+│  Caller Browser  │◄───────►│  Signaling  │◄───────►│  Callee Browser  │
+│  (Window 1)      │ Socket  │ Server (Node│ Socket  │  (Window 2)      │
+└────────▲─────────┘ Events  └─────────────┘ Events  └────────▲─────────┘
+         │                                                    │
+         └───────────── P2P Encrypted Media Stream ───────────┘
+                       (DTLS-SRTP Audio / Video / Screen)
+```
+
+### Signaling & Session Lifecycle
+
+The signaling channel is managed over authenticated WebSockets (`server/src/sockets/handlers/call.handler.js`):
+
+* **Shared Conversation Authorization**: Before initiating a call, the server verifies both participants share a conversation room (`members.userId`). Calls between unverified strangers are blocked.
+* **Atomic Busy & Online Check**: Database authorization, socket presence check, and call session mapping (`userCallMap`) run atomically in the same event tick, eliminating race conditions where two callers might ring the same user simultaneously.
+* **Centralized Secure Relay (`relay()`)**: SDP offers, answers, and ICE candidates are relayed strictly between active, verified participants of connected calls. Malicious sockets cannot inject signaling events into foreign calls.
+* **10-Second Network Grace Period (`DISCONNECT_GRACE_MS`)**: If a socket disconnects abruptly mid-call (e.g. mobile Wi-Fi to cellular handover), a 10-second grace window allows reconnection before declaring the peer disconnected.
+* **Multi-Tab Dismissal (`call:answered-elsewhere`)**: Answering or rejecting a call on one tab immediately dismisses the ringing dialog across all other active devices and tabs of that user.
+
+### STUN/TURN & Metered.ca ICE Configuration
+
+Real-world P2P calls frequently face NAT barriers, CGNAT, and firewalls. Threadline resolves connectivity via dynamic ICE discovery (`server/src/modules/calls/calls.controller.js`):
+
+* **Dynamic Metered.ca TURN**: The server calls Metered.ca's API to fetch short-lived, time-limited TURN relay credentials.
+* **In-Memory Caching (`CACHE_TTL_MS = 5m`)**: ICE server configurations are cached for 5 minutes, preventing redundant external API calls during bursts.
+* **Safe Fallback**: If TURN credentials fail or time out (5-second `AbortController`), the server seamlessly falls back to Google's public STUN servers (`stun:stun.l.google.com:19302`).
+* **Cache-Control Security**: Responses are served with `Cache-Control: no-store` so sensitive, expiring TURN credentials are never cached by intermediate proxies or browser disks.
+
+### WebRTC Media Engine & Opus Audio Tuning
+
+WebRTC connections are managed by [`useWebRTC.js`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/hooks/useWebRTC.js):
+
+* **Opus Voice Tuning (`tuneOpus`)**: Modifies the SDP to optimize audio for voice:
+  * Forces mono audio (`stereo=0`, `sprop-stereo=0`) for maximum acoustic echo cancellation (AEC) efficiency.
+  * Enables in-band Forward Error Correction (`useinbandfec=1`) to reconstruct lost audio packets over jittery networks.
+  * Caps maximum average bitrate at 32 kbps (`maxaveragebitrate=32000`) for wideband HD voice without speaker saturation.
+* **Pre-Negotiated Bidirectional Transceivers (`ensureTransceivers` & `setSendRecv`)**: Both caller and callee configure audio and video transceivers as `sendrecv` from call creation. This allows either user to start or stop screen sharing and toggle video mid-call with **zero SDP renegotiation** needed.
+* **Glare Handling / Perfect Negotiation**: If both peers trigger offers simultaneously, the callee functions as the "polite" peer and rolls back its local offer (`type: "rollback"`), preventing signaling deadlocks.
+
+### Adaptive Network Quality & Auto-Degradation
+
+To maintain smooth calls during bandwidth drops, [`useWebRTC.js`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/hooks/useWebRTC.js) runs an active WebRTC statistics monitor every 4 seconds (`pc.getStats()`):
+
+| Profile | Trigger Criteria | Camera Bitrate / FPS | Screen Bitrate / FPS | Resolution Scale |
+| :--- | :--- | :--- | :--- | :--- |
+| **Good** | Default / Loss $\le 3\%$, RTT $\le 300\text{ms}$ | 1,500 kbps @ 30 FPS | 2,500 kbps @ 15 FPS | 1.0× (Native) |
+| **Fair** | Loss $> 3\%$ or RTT $> 300\text{ms}$ | 800 kbps @ 24 FPS | 1,200 kbps @ 10 FPS | 1.5× Downscale |
+| **Poor** | Loss $> 10\%$ or RTT $> 600\text{ms}$ | 300 kbps @ 15 FPS | 500 kbps @ 5 FPS | 2.0× Downscale |
+
+* **Immediate Degradation, Hysteresis Recovery**: Quality drops to Fair or Poor immediately when loss/latency spikes to preserve audio intelligibility. Quality recovers to higher tiers only after 3 consecutive clean sampling cycles (`goodStreak >= 3`), preventing rapid visual flickering.
+* **Detail-Preserving Screen Sharing**: Screen tracks receive `contentHint = "detail"` and `degradationPreference = "maintain-resolution"`. When network quality degrades, screen sharing lowers framerate rather than blurring code, text, or spreadsheets.
+
+### Intelligent Auto-Layout & Aspect Ratio Engine
+
+Video rendering is managed by [`VideoGrid.jsx`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/VideoGrid.jsx) with custom viewport math:
+
+* **Aspect Ratio Calculation (`FILL_TOLERANCE = 1.2`)**:
+  * Compares decoded video dimensions (`videoWidth`, `videoHeight`) against the container (`ResizeObserver`).
+  * If the incoming video aspect ratio is within 20% of the viewport, it uses full-bleed `fill` (crops at most ~15%).
+  * Otherwise, it uses `fit`, computing a framed viewport that prevents cutting off heads or vertical smartphone video.
+  * **Screen shares are strictly forced to `fit` mode**, ensuring full UI visibility.
+* **Ambient Frosted Backdrop**: In `fit` mode, a duplicate background video is rendered with heavy zoom and Gaussian blur (`blur-2xl opacity-40`), creating an ambient lighting effect similar to Apple FaceTime and Google Meet.
+* **Dynamic Picture-in-Picture (PiP)**: Local preview PiP automatically mirrors camera feeds (`scale-x-[-1]`), un-mirrors screen shares, and shifts its aspect ratio between portrait (mobile) and landscape (desktop).
+* **Fit/Fill Controls**: Users can double-click anywhere on the video or use the floating control button to toggle between Fit and Fill modes.
+
+### Race-Condition Proof State Machine & Audio Isolation
+
+* **Dedicated Audio Element (`<RemoteAudio/>`)**:
+  * Incoming audio is bound exclusively to a permanent, provider-level `<audio autoPlay playsInline />` element (`RemoteAudio.jsx`).
+  * All `<video>` elements are permanently forced to `muted={true}` via code and DOM properties.
+  * This completely decouples audio from video rendering: minimizing, maximizing, hiding, or changing video layout **never causes audio dropouts, echoes, or volume jumps**.
+  * Handles browser Autoplay policy blocks by deferring playback to the next user interaction (`pointerdown`).
+* **Synchronous Ref State (`callStateRef` & `actionsRef`)**: Socket handlers in `CallContext.jsx` access state through `callStateRef.current` and callbacks through `actionsRef.current`. Socket listeners are bound once, preventing React closure staleness and re-subscription loops.
+* **Double-Click Lock & Permission Cancellation**: Outgoing calls immediately claim the `"calling"` state. If a user cancels while the browser camera/mic permission prompt is pending, tracks are torn down immediately without dangling calls.
+
+---
+
 ## 💻 Tech Stack
 
 ### Frontend
 * **Core:** React 19, Vite 8, React Router v7
 * **Styling & UI:** Tailwind CSS v4, Lucide Icons, Radix UI primitives, Sonner toasts
-* **Real-time:** Socket.io-client
+* **Real-time & Calling:** WebRTC (RTCPeerConnection, DTLS-SRTP, Adaptive Bitrate, Opus Voice Tuning), Socket.io-client
 * **Cryptography:** Native Web Crypto API (`window.crypto.subtle`)
 * **Storage & PDF:** IndexedDB (local encrypted caching & key storage), `pdfjs-dist`
 * **Media:** Emoji Picker React, Gif Picker React, QR Code generator
@@ -385,7 +498,7 @@ Users can create an encrypted backup of their device keys to restore conversatio
 ### Backend
 * **Core:** Node.js (ES Modules), Express 5
 * **Database:** MongoDB, Mongoose 9
-* **Real-time Engine:** Socket.io 4
+* **Real-time & Signaling:** Socket.io 4, WebRTC Signaling Engine, Metered.ca TURN & Google STUN
 * **Authentication:** HTTP-only JWT cookies, Passport.js Google OAuth 2.0
 * **Storage & Push:** Cloudinary SDK, `web-push` (VAPID)
 
@@ -397,6 +510,7 @@ Users can create an encrypted backup of their device keys to restore conversatio
 * **Node.js:** v20+ installed
 * **MongoDB:** Local instance or MongoDB Atlas URI
 * **Cloudinary Account:** For media storage
+* **Metered.ca Account (Optional / Free):** For TURN relay across restrictive cellular networks / symmetric NATs
 
 ### 1. Configure Server Environment
 Create `server/.env`:
@@ -405,7 +519,8 @@ PORT=5000
 NODE_ENV=development
 CLIENT_URL=http://localhost:5173
 MONGO_URI=mongodb://localhost:27017/threadline
-JWT_SECRET=your_super_secret_jwt_key
+JWT_ACCESS_SECRET=your_super_secret_jwt_access_key
+JWT_REFRESH_SECRET=your_super_secret_jwt_refresh_key
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 CLOUDINARY_CLOUD_NAME=your_cloud_name
@@ -414,6 +529,8 @@ CLOUDINARY_API_SECRET=your_api_secret
 VAPID_PUBLIC_KEY=your_vapid_public_key
 VAPID_PRIVATE_KEY=your_vapid_private_key
 VAPID_SUBJECT=mailto:admin@threadline.com
+METERED_DOMAIN=your_app.metered.live
+METERED_API_KEY=your_metered_api_key
 ```
 
 ### 2. Configure Client Environment
@@ -440,4 +557,4 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser. Register an account and start private, end-to-end encrypted conversations!
+Open `http://localhost:5173` in your browser. Register an account and start private, end-to-end encrypted conversations and crystal-clear voice/video calls!
