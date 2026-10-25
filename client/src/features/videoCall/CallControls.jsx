@@ -37,7 +37,11 @@ export function CallControls({
             : "bg-muted text-foreground hover:bg-muted/80"
         }`}
       >
-        {isAudioMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        {isAudioMuted ? (
+          <MicOff className="h-5 w-5" />
+        ) : (
+          <Mic className="h-5 w-5" />
+        )}
       </button>
 
       {/* Toggle Camera (Only for video calls or if upgraded) */}
@@ -52,7 +56,11 @@ export function CallControls({
               : "bg-muted text-foreground hover:bg-muted/80"
           }`}
         >
-          {isVideoDisabled ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+          {isVideoDisabled ? (
+            <VideoOff className="h-5 w-5" />
+          ) : (
+            <Video className="h-5 w-5" />
+          )}
         </button>
       )}
 
@@ -79,7 +87,11 @@ export function CallControls({
         aria-label={isMinimized ? "Maximize call" : "Minimize call"}
         className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground transition hover:bg-muted/80"
       >
-        {isMinimized ? <Maximize2 className="h-5 w-5" /> : <Minimize2 className="h-5 w-5" />}
+        {isMinimized ? (
+          <Maximize2 className="h-5 w-5" />
+        ) : (
+          <Minimize2 className="h-5 w-5" />
+        )}
       </button>
 
       {/* End Call Button */}

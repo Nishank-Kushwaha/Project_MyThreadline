@@ -255,20 +255,42 @@ export function VideoGrid({
       </div>
 
       {!hasRemoteVideo && (
-        <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
+        <div
+          className={cn(
+            "flex flex-col items-center justify-center text-center",
+            isMinimized ? "gap-2 p-2 pb-12" : "gap-4 p-6",
+          )}
+        >
           <div className="relative">
-            <div className="absolute -inset-4 animate-ping rounded-full bg-primary/20 opacity-40" />
-            <div className="absolute -inset-8 animate-pulse rounded-full bg-primary/10 opacity-30" />
+            <div
+              className={cn(
+                "absolute animate-ping rounded-full bg-primary/20 opacity-40",
+                isMinimized ? "-inset-2" : "-inset-4",
+              )}
+            />
+            <div
+              className={cn(
+                "absolute animate-pulse rounded-full bg-primary/10 opacity-30",
+                isMinimized ? "-inset-4" : "-inset-8",
+              )}
+            />
             <Avatar
               src={peer?.avatarUrl}
               name={peer?.name}
-              className="relative h-28 w-28 text-3xl ring-4 ring-background/50 shadow-2xl"
+              className={cn(
+                "relative ring-background/50 shadow-2xl",
+                isMinimized
+                  ? "h-20 w-20 text-xl ring-2"
+                  : "h-28 w-28 text-3xl ring-4",
+              )}
             />
           </div>
           <div className="space-y-1">
-            <h3 className="text-xl font-semibold text-white tracking-tight">
-              {peer?.name || "Participant"}
-            </h3>
+            {!isMinimized && (
+              <h3 className="text-xl font-semibold text-white tracking-tight">
+                {peer?.name || "Participant"}
+              </h3>
+            )}
             {peerMediaState.isAudioMuted && (
               <p className="flex items-center justify-center gap-1.5 text-xs text-red-400">
                 <MicOff className="h-3.5 w-3.5" />

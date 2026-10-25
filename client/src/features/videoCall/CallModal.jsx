@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Lock, PhoneOff, Maximize2, ShieldCheck, Loader2 } from "lucide-react";
 import { useCall } from "@/context/CallContext";
 import { useAuth } from "@/context/AuthContext";
@@ -80,6 +80,129 @@ function NetworkIndicator({ quality = "good" }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// DRAGGABLE MINIMIZED WINDOW
+// ---------------------------------------------------------------------------
+const MINI_W = 288; // matches the old w-72
+const MINI_H = 192; // matches the old h-48
+const MINI_MARGIN = 16;
+
+function useViewportSize() {
+  const [size, setSize] = useState(() => ({
+    w: typeof window === "undefined" ? 1280 : window.innerWidth,
+    h: typeof window === "undefined" ? 720 : window.innerHeight,
+  }));
+
+  useEffect(() => {
+    const update = () =>
+      setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  return size;
+}
+
+/** corner is one of "tl" | "tr" | "bl" | "br" */
+function cornerPosition(corner, vw, vh) {
+  const x = corner.includes("l")
+    ? MINI_MARGIN
+    : Math.max(MINI_MARGIN, vw - MINI_W - MINI_MARGIN);
+  const y = corner.includes("t")
+    ? MINI_MARGIN
+    : Math.max(MINI_MARGIN, vh - MINI_H - MINI_MARGIN);
+  return { x, y };
+}
+
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+
+/**
+ * Floating call window. Drag it anywhere with a mouse or finger; on release it
+ * glides to the nearest screen corner. Buttons inside stay clickable.
+ * The corner is owned by the parent so it is remembered after maximizing.
+ */
+function DraggableMiniWindow({ corner, onCornerChange, children }) {
+  const { w: vw, h: vh } = useViewportSize();
+  const [drag, setDrag] = useState(null); // {x, y} while dragging, else null
+  const gestureRef = useRef(null);
+
+  const resting = cornerPosition(corner, vw, vh);
+  const pos = drag ?? resting;
+
+  const positionFromPointer = (e) => {
+    const g = gestureRef.current;
+    return {
+      x: clamp(g.originX + (e.clientX - g.startX), 0, Math.max(0, vw - MINI_W)),
+      y: clamp(g.originY + (e.clientY - g.startY), 0, Math.max(0, vh - MINI_H)),
+    };
+  };
+
+  const handlePointerDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return; // primary button / touch only
+    if (e.target.closest("button")) return; // let buttons work normally
+
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    gestureRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: resting.x,
+      originY: resting.y,
+    };
+    setDrag({ ...resting });
+  };
+
+  const handlePointerMove = (e) => {
+    if (!gestureRef.current) return;
+    setDrag(positionFromPointer(e));
+  };
+
+  const finishDrag = (e) => {
+    if (!gestureRef.current) return;
+    const { x, y } = positionFromPointer(e);
+    gestureRef.current = null;
+    setDrag(null);
+
+    // Snap to whichever corner the window's center is closest to
+    const centerX = x + MINI_W / 2;
+    const centerY = y + MINI_H / 2;
+    onCornerChange(
+      `${centerY < vh / 2 ? "t" : "b"}${centerX < vw / 2 ? "l" : "r"}`,
+    );
+  };
+
+  return (
+    <div
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishDrag}
+      onPointerCancel={finishDrag}
+      onDragStart={(e) => e.preventDefault()} // stop the browser's native image drag (avatar ghost)
+      style={{
+        width: MINI_W,
+        height: MINI_H,
+        transform: `translate3d(${pos.x}px, ${pos.y}px, 0)`,
+      }}
+      className={cn(
+        "fixed left-0 top-0 z-50 touch-none select-none overflow-hidden rounded-2xl border border-white/20 bg-zinc-950 shadow-2xl [&_img]:pointer-events-none [&_img]:select-none [&_img]:[-webkit-user-drag:none]",
+        drag
+          ? "cursor-grabbing"
+          : "cursor-grab transition-transform duration-200 ease-out",
+      )}
+    >
+      <div className="flex h-full w-full flex-col animate-in fade-in duration-200">
+        {children}
+      </div>
+
+      {/* Little grip so people can tell it is draggable */}
+      <span className="pointer-events-none absolute left-1/2 top-1.5 z-30 h-1 w-8 -translate-x-1/2 rounded-full bg-white/40" />
+    </div>
+  );
+}
+
 export function CallModal() {
   const { user: currentUser } = useAuth();
   const {
@@ -104,6 +227,9 @@ export function CallModal() {
     toggleScreenShare,
   } = useCall();
 
+  // Remembered between minimize / maximize (must stay above the early return)
+  const [miniCorner, setMiniCorner] = useState("br");
+
   if (callStatus !== "calling" && callStatus !== "connected") {
     return null;
   }
@@ -112,11 +238,11 @@ export function CallModal() {
     callStatus === "connected" ? getLinkPhase(connectionState) : null;
   const isLive = phase === "live";
 
-  // 1. FLOATING MINIMIZED WINDOW (Picture-in-Picture inside App)
+  // 1. FLOATING MINIMIZED WINDOW (draggable, snaps to corners)
   if (isMinimized) {
     return (
-      <div className="fixed bottom-6 right-6 z-50 flex h-48 w-72 flex-col overflow-hidden rounded-2xl border border-white/20 bg-zinc-950 shadow-2xl transition animate-in fade-in zoom-in-95">
-        <div className="relative flex-1">
+      <DraggableMiniWindow corner={miniCorner} onCornerChange={setMiniCorner}>
+        <div className="relative min-h-0 flex-1">
           <VideoGrid
             localStream={localStream}
             remoteStream={remoteStream}
@@ -135,13 +261,13 @@ export function CallModal() {
             type="button"
             onClick={() => setIsMinimized(false)}
             aria-label="Maximize call"
-            className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80 transition"
+            className="absolute top-2 right-2 z-30 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-md hover:bg-black/80 transition"
           >
             <Maximize2 className="h-4 w-4" />
           </button>
 
           {/* Floating Status Badge */}
-          <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-md">
+          <div className="pointer-events-none absolute top-2 left-2 z-30 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-md">
             {callStatus === "calling" ? (
               <>
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -170,23 +296,23 @@ export function CallModal() {
               </>
             )}
           </div>
-        </div>
 
-        {/* Mini Controls Bar */}
-        <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 border-t border-white/10">
-          <span className="truncate text-xs font-semibold text-white">
-            {peer?.name}
-          </span>
-          <button
-            type="button"
-            onClick={callStatus === "calling" ? cancelCall : endCall}
-            aria-label="End call"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700 transition"
-          >
-            <PhoneOff className="h-4 w-4" />
-          </button>
+          {/* Mini name + end-call bar: overlays the video, ~90% transparent */}
+          <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-transparent px-3 py-2">
+            <span className="truncate text-xs font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+              {peer?.name}
+            </span>
+            <button
+              type="button"
+              onClick={callStatus === "calling" ? cancelCall : endCall}
+              aria-label="End call"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-black/40 hover:bg-red-700 transition"
+            >
+              <PhoneOff className="h-4 w-4" />
+            </button>
+          </div>
         </div>
-      </div>
+      </DraggableMiniWindow>
     );
   }
 
