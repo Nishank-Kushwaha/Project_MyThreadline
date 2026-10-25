@@ -4,11 +4,16 @@ import { MicOff, VideoOff, Expand, Shrink } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * If the incoming video's shape is within this factor of the viewport's shape,
- * we fill the viewport (crop at most ~15%). Otherwise we fit the WHOLE frame
- * and fill the leftover space with a blurred copy of the video.
+ * Auto layout: if the incoming video's shape is within this factor of the
+ * viewport's shape we fill the viewport (crops at most ~15%). Otherwise we show
+ * the WHOLE frame in a framed box that has exactly the video's own shape.
  */
 const FILL_TOLERANCE = 1.2;
+
+// Space kept free in "fit" mode so the call header / control bar never cover the picture
+const HEADER_INSET = 64;
+const CONTROLS_INSET = 100;
+const SIDE_PAD = 12;
 
 /** Bind a stream to a <video> only if it changed, and force muted in code. */
 function useBindVideo(ref, stream, deps = []) {
@@ -125,7 +130,7 @@ export function VideoGrid({
     isMinimized,
   ]);
 
-  // New source type (camera <-> screen) -> go back to automatic layout
+  // New source type (camera <-> screen) -> back to automatic layout
   useEffect(() => setFitOverride(null), [peerIsSharingScreen]);
 
   // ---- decide how to show the remote video --------------------------------
@@ -139,17 +144,32 @@ export function VideoGrid({
     const gap = Math.max(src / view, view / src);
     autoMode = gap <= FILL_TOLERANCE ? "fill" : "fit";
   }
-  // Screen shares are never cropped automatically (text must stay readable)
-  const mode = fitOverride ?? autoMode;
+  const mode = fitOverride ?? autoMode; // screen shares are never auto-cropped
 
   const mirrorRemoteVideo = mirrorRemote && !peerIsSharingScreen;
-  // Blurred backdrop only for camera video that is letterboxed
   const showBackdrop =
     Boolean(hasRemoteVideo) && mode === "fit" && !peerIsSharingScreen;
 
   useBindVideo(backdropRef, showBackdrop ? remoteVideoStream : null, [
     showBackdrop,
   ]);
+
+  // "fit" = a box with the video's OWN shape (phone-shaped for a phone camera),
+  // as large as possible inside the space between the header and the controls.
+  const insets = isMinimized
+    ? { top: 0, bottom: 0, side: 0 }
+    : { top: HEADER_INSET, bottom: CONTROLS_INSET, side: SIDE_PAD };
+
+  let frame = null;
+  if (mode === "fit" && known) {
+    const availW = Math.max(1, viewport.w - insets.side * 2);
+    const availH = Math.max(1, viewport.h - insets.top - insets.bottom);
+    const scale = Math.min(availW / remoteDims.w, availH / remoteDims.h);
+    frame = {
+      w: Math.max(1, Math.floor(remoteDims.w * scale)),
+      h: Math.max(1, Math.floor(remoteDims.h * scale)),
+    };
+  }
 
   const toggleFit = () => setFitOverride(mode === "fit" ? "fill" : "fit");
 
@@ -167,11 +187,11 @@ export function VideoGrid({
     <div
       ref={containerRef}
       onDoubleClick={isMinimized ? undefined : toggleFit}
-      className="relative h-full w-full overflow-hidden bg-zinc-950 flex items-center justify-center"
+      className="relative h-full w-full select-none overflow-hidden bg-zinc-950 flex items-center justify-center"
     >
       {/* Remote audio is played by <RemoteAudio/> (mounted in CallProvider), not here. */}
 
-      {/* 0. BLURRED BACKDROP (fills the bars around a letterboxed camera video) */}
+      {/* 0. DIMMED, BLURRED BACKDROP behind a framed camera video */}
       {showBackdrop && (
         <video
           ref={backdropRef}
@@ -180,25 +200,59 @@ export function VideoGrid({
           muted
           aria-hidden="true"
           className={cn(
-            "pointer-events-none absolute inset-0 h-full w-full object-cover opacity-60 blur-2xl",
+            "pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40 blur-2xl",
             mirrorRemoteVideo ? "-scale-x-110 scale-y-110" : "scale-110",
           )}
         />
       )}
 
       {/* 1. REMOTE FEED */}
-      <video
-        ref={remoteVideoRef}
-        autoPlay
-        playsInline
-        muted
+      <div
         className={cn(
-          "relative z-10 h-full w-full",
-          mode === "fill" ? "object-cover" : "object-contain",
-          mirrorRemoteVideo && "scale-x-[-1]",
+          "absolute inset-0 z-10 flex items-center justify-center",
           !hasRemoteVideo && "hidden",
         )}
-      />
+        style={
+          mode === "fit"
+            ? {
+                paddingTop: insets.top,
+                paddingBottom: insets.bottom,
+                paddingLeft: insets.side,
+                paddingRight: insets.side,
+              }
+            : undefined
+        }
+      >
+        <div
+          className={cn(
+            "relative overflow-hidden",
+            mode === "fit" && frame
+              ? cn(
+                  "bg-black shadow-2xl ring-1 ring-white/20",
+                  !isMinimized &&
+                    (peerIsSharingScreen ? "rounded-lg" : "rounded-2xl"),
+                )
+              : "h-full w-full",
+          )}
+          style={
+            mode === "fit" && frame
+              ? { width: frame.w, height: frame.h }
+              : undefined
+          }
+        >
+          <video
+            ref={remoteVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className={cn(
+              "h-full w-full",
+              mode === "fill" ? "object-cover" : "object-contain",
+              mirrorRemoteVideo && "scale-x-[-1]",
+            )}
+          />
+        </div>
+      </div>
 
       {!hasRemoteVideo && (
         <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
@@ -230,9 +284,10 @@ export function VideoGrid({
         <button
           type="button"
           onClick={toggleFit}
+          onDoubleClick={(e) => e.stopPropagation()}
           aria-label={mode === "fit" ? "Fill screen" : "Fit to screen"}
           title={mode === "fit" ? "Fill screen" : "Fit to screen"}
-          className="absolute left-4 top-20 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition hover:bg-black/70"
+          className="absolute left-4 top-21 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition hover:bg-black/70"
         >
           {mode === "fit" ? (
             <Expand className="h-4 w-4" />
@@ -251,6 +306,7 @@ export function VideoGrid({
             maxHeight: "35vh",
           }}
           className="absolute right-4 top-4 z-20 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl"
+          onDoubleClick={(e) => e.stopPropagation()}
         >
           <video
             ref={localVideoRef}
