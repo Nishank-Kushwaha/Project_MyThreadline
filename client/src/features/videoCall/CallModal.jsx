@@ -224,6 +224,7 @@ export function CallModal() {
     peerLevelRef,
     selfSpeaking,
     selfLevelRef,
+    peerReconnecting,
     cancelCall,
     endCall,
     toggleMic,
@@ -395,7 +396,7 @@ export function CallModal() {
         />
 
         {/* Connecting / Reconnecting pill over the video */}
-        {callStatus === "connected" && !isLive && (
+        {callStatus === "connected" && (!isLive || peerReconnecting) && (
           <div
             role="status"
             aria-live="polite"
@@ -404,14 +405,18 @@ export function CallModal() {
             <div
               className={cn(
                 "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md",
-                phase === "reconnecting" ? "bg-amber-500/80" : "bg-black/60",
+                phase === "reconnecting" || peerReconnecting
+                  ? "bg-amber-500/80"
+                  : "bg-black/60",
               )}
             >
               <Loader2 className="h-4 w-4 animate-spin" />
               <span>
                 {phase === "reconnecting"
                   ? "Connection lost. Reconnecting…"
-                  : "Connecting…"}
+                  : peerReconnecting
+                    ? `${peer?.name || "The other person"} lost connection. Waiting for them to return…`
+                    : "Connecting…"}
               </span>
             </div>
           </div>

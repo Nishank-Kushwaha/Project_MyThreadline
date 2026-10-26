@@ -41,8 +41,14 @@ export function CallProvider({ children }) {
     callStatus: "idle",
     callId: null,
     callType: "video",
+    isCaller: false,
   });
+  // Secret issued by the server for THIS tab's side of the call. It is what lets
+  // this tab (and no other device) take its call back after a socket reconnect.
+  const rejoinTokenRef = useRef(null);
+  const mediaReportedRef = useRef(false);
   const actionsRef = useRef({});
+  const [peerReconnecting, setPeerReconnecting] = useState(false);
   const failTimerRef = useRef(null);
 
   const {
@@ -78,6 +84,7 @@ export function CallProvider({ children }) {
       clearTimeout(failTimerRef.current);
       failTimerRef.current = null;
       toast.dismiss("call-net");
+      actionsRef.current.reportMediaConnected?.(); // accepted != connected: tell the server it is real
     } else if (state === "disconnected") {
       toast.warning("Connection unstable, reconnecting…", { id: "call-net" });
     } else if (state === "failed") {
@@ -108,6 +115,7 @@ export function CallProvider({ children }) {
     handleAnswer,
     handleRemoteIceCandidate,
     replaceVideoTrack,
+    restartIce,
     closeConnection,
   } = webrtc;
 
@@ -147,7 +155,13 @@ export function CallProvider({ children }) {
       callStatus: "idle",
       callId: null,
       callType: "video",
+      isCaller: false,
     };
+    rejoinTokenRef.current = null;
+    mediaReportedRef.current = false;
+    toast.dismiss("peer-net");
+    toast.dismiss("socket-net");
+    setPeerReconnecting(false);
     setCallStatus("idle");
     setCallId(null);
     setRoomId(null);
@@ -187,6 +201,7 @@ export function CallProvider({ children }) {
         callStatus: "calling",
         callId: null,
         callType: requestedType,
+        isCaller: true,
       };
 
       try {
@@ -228,6 +243,7 @@ export function CallProvider({ children }) {
               return;
             }
             callStateRef.current.callId = res.callId;
+            rejoinTokenRef.current = res.rejoinToken ?? null;
             setCallId(res.callId);
           },
         );
@@ -269,6 +285,7 @@ export function CallProvider({ children }) {
           toast.error(res?.message || "Could not accept call.");
           return;
         }
+        rejoinTokenRef.current = res.rejoinToken ?? null;
         callStateRef.current.callStatus = "connected";
         setCallStatus("connected");
       });
@@ -297,7 +314,7 @@ export function CallProvider({ children }) {
   const endCall = useCallback(() => {
     const id = callStateRef.current.callId;
     if (socket && id) {
-      socket.emit("call:end", { callId: id });
+      socket.emit("call:end", { callId: id, token: rejoinTokenRef.current });
       playCallEndTone();
     }
     resetCallState();
@@ -352,13 +369,30 @@ export function CallProvider({ children }) {
     playCallEndTone,
     stopSound,
     startIncomingRingtone,
+    // Only restart ICE when the media path is actually unhealthy
+    restartIceIfNeeded: () => {
+      if (connectionState !== "connected") restartIce();
+    },
+    reportMediaConnected: () => {
+      const id = callStateRef.current.callId;
+      if (!socket || !id || mediaReportedRef.current) return;
+      mediaReportedRef.current = true;
+      socket.emit("call:media-connected", { callId: id });
+    },
+    // After being offline the other side may have missed our mute/camera/screen state
+    resyncMedia: () => {
+      notifyPeer("audio", !isAudioMuted);
+      notifyPeer("video", !isVideoDisabled);
+      if (isScreenSharing) notifyPeer("screen", true);
+    },
   };
 
   // Hang up if the tab is closed mid-call
   useEffect(() => {
     const onUnload = () => {
       const id = callStateRef.current.callId;
-      if (socket && id) socket.emit("call:end", { callId: id });
+      if (socket && id)
+        socket.emit("call:end", { callId: id, token: rejoinTokenRef.current });
     };
     window.addEventListener("pagehide", onUnload);
     return () => window.removeEventListener("pagehide", onUnload);
@@ -386,6 +420,7 @@ export function CallProvider({ children }) {
         callStatus: "incoming",
         callId: id,
         callType: type,
+        isCaller: false,
       };
       setCallStatus("incoming");
       setCallId(id);
@@ -422,11 +457,13 @@ export function CallProvider({ children }) {
       );
     };
 
-    const onCallTimeout = ({ callId: id }) => {
+    const onCallTimeout = ({ callId: id, reason }) => {
       if (!isCurrent(id)) return;
       actionsRef.current.playCallEndTone();
       actionsRef.current.resetCallState();
-      toast.info("No answer.");
+      toast.info(
+        reason === "offline" ? "They just went offline." : "No answer.",
+      );
     };
 
     const onCallCancelled = ({ callId: id }) => {
@@ -458,10 +495,18 @@ export function CallProvider({ children }) {
       await actionsRef.current.handleRemoteIceCandidate(candidate);
     };
 
-    const onCallEnded = ({ callId: id, duration: callDur }) => {
+    const onCallEnded = ({ callId: id, duration: callDur, reason }) => {
       if (!isCurrent(id)) return;
       actionsRef.current.playCallEndTone();
       actionsRef.current.resetCallState();
+      if (reason === "media-failed") {
+        toast.error("Couldn't establish a connection. Please try again.");
+        return;
+      }
+      if (reason === "max-duration") {
+        toast.info("The call reached the maximum duration.");
+        return;
+      }
       const mins = Math.floor((callDur || 0) / 60);
       const secs = (callDur || 0) % 60;
       toast.info(`Call ended (${mins > 0 ? `${mins}m ${secs}s` : `${secs}s`})`);
@@ -486,7 +531,68 @@ export function CallProvider({ children }) {
       });
     };
 
+    // The other side lost its connection; the server is holding the call for them
+    const onPeerReconnecting = ({ callId: id }) => {
+      if (!isCurrent(id)) return;
+      setPeerReconnecting(true);
+    };
+
+    const onPeerReconnected = ({ callId: id }) => {
+      if (!isCurrent(id)) return;
+      setPeerReconnecting(false);
+      // The caller owns ICE restarts: bring the media path back if it did not recover itself
+      if (callStateRef.current.isCaller)
+        actionsRef.current.restartIceIfNeeded();
+    };
+
+    // OUR socket dropped and came back (new socket id): take our call back with the secret token
+    const onSocketDisconnect = (reason) => {
+      if (reason === "io client disconnect") return;
+      if (callStateRef.current.callStatus === "connected") {
+        toast.warning("Connection lost. Reconnecting…", { id: "socket-net" });
+      }
+    };
+
+    const onSocketConnect = () => {
+      const {
+        callStatus: status,
+        callId: id,
+        isCaller: caller,
+      } = callStateRef.current;
+
+      // A call that was still RINGING when our connection dropped is gone on the
+      // server (it cancels immediately). Don't leave this screen stuck on "Ringing…".
+      if (status === "calling" || status === "incoming") {
+        actionsRef.current.resetCallState();
+        if (status === "calling")
+          toast.info("Call cancelled because your connection dropped.");
+        return;
+      }
+
+      if (status !== "connected" || !id) return; // only an accepted call can be resumed
+
+      socket.emit(
+        "call:rejoin",
+        { callId: id, token: rejoinTokenRef.current },
+        (res) => {
+          if (!isCurrent(id)) return;
+          if (!res?.success) {
+            actionsRef.current.resetCallState();
+            toast.info("The call ended while you were offline.");
+            return;
+          }
+          toast.dismiss("socket-net");
+          actionsRef.current.resyncMedia();
+          if (caller) actionsRef.current.restartIceIfNeeded();
+        },
+      );
+    };
+
     const handlers = {
+      connect: onSocketConnect,
+      disconnect: onSocketDisconnect,
+      "call:peer-reconnecting": onPeerReconnecting,
+      "call:peer-reconnected": onPeerReconnected,
       "call:incoming": onIncomingCall,
       "call:accepted": onCallAccepted,
       "call:rejected": onCallRejected,
@@ -526,6 +632,7 @@ export function CallProvider({ children }) {
     peerLevelRef,
     selfSpeaking,
     selfLevelRef,
+    peerReconnecting,
     isAudioMuted,
     isVideoDisabled,
     isScreenSharing,
