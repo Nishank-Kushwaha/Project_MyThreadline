@@ -19,7 +19,7 @@ import {
 import { formatFileSize } from "@/lib/e2ee/media";
 
 import { GifPickerButton } from "./GifPickerButton";
-import { gifToFile } from "./gifToFile";
+import { gifToFile } from "@/lib/utils";
 import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
 import { VoiceRecorder } from "./VoiceRecorder";
 import { CreatePollDialog } from "./CreatePollDialog";
@@ -348,203 +348,203 @@ export function MessageInput({
         onSubmit={handleSubmit}
         className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       >
-      {/* Replying banner (WhatsApp style preview card) */}
-      {replyingTo && (
-        <div className="relative mb-2 flex items-center justify-between overflow-hidden rounded-xl border border-border bg-secondary/80 p-2.5 pl-3.5 shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Reply className="h-4 w-4 text-primary shrink-0" />
-            <div className="min-w-0 text-xs">
-              <span className="font-semibold text-primary truncate block">
-                {replyingTo.senderName || "Message"}
-              </span>
-              <p className="truncate text-muted-foreground text-[11px]">
-                {replyingTo.text ||
-                  (replyingTo.mediaType
-                    ? `[${replyingTo.mediaType.toUpperCase()}]`
-                    : "Attachment")}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onCancelReply}
-            aria-label="Cancel reply"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      )}
-
-      {/* File error message */}
-      {fileError && (
-        <div className="mb-2 text-xs text-destructive">{fileError}</div>
-      )}
-
-      {gifLoading && (
-        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          Loading GIF…
-        </div>
-      )}
-
-      {/* Real-time Link Preview Banner (WhatsApp style, shown above input when URL is pasted/typed) */}
-      {showLinkPreview && (
-        <div className="relative mb-2 overflow-hidden rounded-2xl border border-input bg-secondary/60 p-2 pr-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <LinkPreviewCard url={detectedUrl} isOwn={false} />
+        {/* Replying banner (WhatsApp style preview card) */}
+        {replyingTo && (
+          <div className="relative mb-2 flex items-center justify-between overflow-hidden rounded-xl border border-border bg-secondary/80 p-2.5 pl-3.5 shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Reply className="h-4 w-4 text-primary shrink-0" />
+              <div className="min-w-0 text-xs">
+                <span className="font-semibold text-primary truncate block">
+                  {replyingTo.senderName || "Message"}
+                </span>
+                <p className="truncate text-muted-foreground text-[11px]">
+                  {replyingTo.text ||
+                    (replyingTo.mediaType
+                      ? `[${replyingTo.mediaType.toUpperCase()}]`
+                      : "Attachment")}
+                </p>
+              </div>
             </div>
             <button
               type="button"
-              onClick={() => setDismissedUrl(detectedUrl)}
-              aria-label="Remove link preview"
-              title="Remove preview"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              onClick={onCancelReply}
+              aria-label="Cancel reply"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* File error message */}
+        {fileError && (
+          <div className="mb-2 text-xs text-destructive">{fileError}</div>
+        )}
+
+        {gifLoading && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Loading GIF…
+          </div>
+        )}
+
+        {/* Real-time Link Preview Banner (WhatsApp style, shown above input when URL is pasted/typed) */}
+        {showLinkPreview && (
+          <div className="relative mb-2 overflow-hidden rounded-2xl border border-input bg-secondary/60 p-2 pr-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <LinkPreviewCard url={detectedUrl} isOwn={false} />
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedUrl(detectedUrl)}
+                aria-label="Remove link preview"
+                title="Remove preview"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Selected file preview card */}
+        {selectedFile && (
+          <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
+            <div className="flex items-center gap-3 overflow-hidden">
+              {filePreview ? (
+                <img
+                  src={filePreview}
+                  alt="Upload preview"
+                  className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <File className="h-6 w-6" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-foreground">
+                  {selectedFile.name}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {formatFileSize(selectedFile.size)}
+                  {isEncrypted ? " • 🔒 Encrypted before upload" : ""}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRemoveFile}
+              aria-label="Remove attachment"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Selected file preview card */}
-      {selectedFile && (
-        <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
-          <div className="flex items-center gap-3 overflow-hidden">
-            {filePreview ? (
-              <img
-                src={filePreview}
-                alt="Upload preview"
-                className="h-12 w-12 shrink-0 rounded-lg object-cover"
-              />
-            ) : (
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <File className="h-6 w-6" />
-              </div>
-            )}
-            <div className="min-w-0">
-              <p className="truncate text-xs font-semibold text-foreground">
-                {selectedFile.name}
-              </p>
-              <p className="text-[11px] text-muted-foreground">
-                {formatFileSize(selectedFile.size)}
-                {isEncrypted ? " • 🔒 Encrypted before upload" : ""}
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleRemoveFile}
-            aria-label="Remove attachment"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {isVoiceRecording ? (
-        <VoiceRecorder
-          onSendVoice={handleSendVoice}
-          onCancel={cancelVoice}
-          isSending={isSending}
-        />
-      ) : (
-        <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
-          {/* Hidden File Input */}
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            className="hidden"
-            accept={ACCEPT_ATTRIBUTE}
+        {isVoiceRecording ? (
+          <VoiceRecorder
+            onSendVoice={handleSendVoice}
+            onCancel={cancelVoice}
+            isSending={isSending}
           />
+        ) : (
+          <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              className="hidden"
+              accept={ACCEPT_ATTRIBUTE}
+            />
 
-          {/* Attachment Button */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isSending}
-            aria-label="Attach file"
-            title="Attach file or photo"
-            className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            <Paperclip className="h-4 w-4" />
-          </button>
-
-          <GifPickerButton
-            onSelect={handleGifSelect}
-            disabled={isSending || gifLoading}
-          />
-
-          {/* Poll Button */}
-          <button
-            type="button"
-            onClick={() => setIsPollDialogOpen(true)}
-            disabled={isSending || isVoiceRecording}
-            aria-label="Create poll"
-            title="Create a poll"
-            className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            <BarChart2 className="h-4 w-4" />
-          </button>
-
-          <textarea
-            ref={textareaRef}
-            value={text}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            rows={1}
-            placeholder={
-              selectedFile ? "Add a caption… (optional)" : "Type a message…"
-            }
-            aria-label="Message"
-            autoComplete="off"
-            className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"
-          />
-
-          {canSend ? (
-            <Button
-              type="submit"
-              disabled={!canSend}
-              aria-label="Send message"
-              className="h-10 w-10 shrink-0 rounded-full p-0"
-            >
-              {isSending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <Send className="h-5 w-5" />
-              )}
-            </Button>
-          ) : (
+            {/* Attachment Button */}
             <button
               type="button"
-              onClick={() => {
-                setIsVoiceRecording(true);
-                onTyping?.();
-              }}
+              onClick={() => fileInputRef.current?.click()}
               disabled={isSending}
-              aria-label="Record voice note"
-              title="Record voice message"
-              className="h-10 w-10 shrink-0 flex items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-50"
+              aria-label="Attach file"
+              title="Attach file or photo"
+              className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
             >
-              <Mic className="h-5 w-5" />
+              <Paperclip className="h-4 w-4" />
             </button>
-          )}
-        </div>
-      )}
-    </form>
 
-    {/* WhatsApp-style Create Poll Dialog */}
-    <CreatePollDialog
-      open={isPollDialogOpen}
-      onOpenChange={setIsPollDialogOpen}
-      onSubmit={handleCreatePoll}
-    />
-  </>
-);
+            <GifPickerButton
+              onSelect={handleGifSelect}
+              disabled={isSending || gifLoading}
+            />
+
+            {/* Poll Button */}
+            <button
+              type="button"
+              onClick={() => setIsPollDialogOpen(true)}
+              disabled={isSending || isVoiceRecording}
+              aria-label="Create poll"
+              title="Create a poll"
+              className="mb-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <BarChart2 className="h-4 w-4" />
+            </button>
+
+            <textarea
+              ref={textareaRef}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              rows={1}
+              placeholder={
+                selectedFile ? "Add a caption… (optional)" : "Type a message…"
+              }
+              aria-label="Message"
+              autoComplete="off"
+              className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"
+            />
+
+            {canSend ? (
+              <Button
+                type="submit"
+                disabled={!canSend}
+                aria-label="Send message"
+                className="h-10 w-10 shrink-0 rounded-full p-0"
+              >
+                {isSending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+              </Button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsVoiceRecording(true);
+                  onTyping?.();
+                }}
+                disabled={isSending}
+                aria-label="Record voice note"
+                title="Record voice message"
+                className="h-10 w-10 shrink-0 flex items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-50"
+              >
+                <Mic className="h-5 w-5" />
+              </button>
+            )}
+          </div>
+        )}
+      </form>
+
+      {/* WhatsApp-style Create Poll Dialog */}
+      <CreatePollDialog
+        open={isPollDialogOpen}
+        onOpenChange={setIsPollDialogOpen}
+        onSubmit={handleCreatePoll}
+      />
+    </>
+  );
 }
