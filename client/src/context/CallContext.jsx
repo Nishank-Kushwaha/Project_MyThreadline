@@ -51,27 +51,6 @@ export function CallProvider({ children }) {
   const [peerReconnecting, setPeerReconnecting] = useState(false);
   const failTimerRef = useRef(null);
 
-  const {
-    startOutgoingRingback,
-    startIncomingRingtone,
-    playCallEndTone,
-    stopSound,
-  } = useCallSound();
-
-  const {
-    localStream,
-    getLocalStream,
-    isAudioMuted,
-    isVideoDisabled,
-    isScreenSharing,
-    acquireLocalStream,
-    toggleAudio,
-    toggleVideo,
-    startScreenShare,
-    stopScreenShare,
-    stopAllMedia,
-  } = useMediaDevices();
-
   const handlePeerMediaToggle = useCallback(({ kind, enabled }) => {
     setPeerMediaState((prev) => ({
       ...prev,
@@ -100,11 +79,26 @@ export function CallProvider({ children }) {
     }
   }, []);
 
-  const webrtc = useWebRTC({
-    socket,
-    onPeerMediaToggle: handlePeerMediaToggle,
-    onConnectionStateChange: handleConnectionStateChange,
-  });
+  const {
+    startOutgoingRingback,
+    startIncomingRingtone,
+    playCallEndTone,
+    stopSound,
+  } = useCallSound();
+
+  const {
+    localStream,
+    getLocalStream,
+    isAudioMuted,
+    isVideoDisabled,
+    isScreenSharing,
+    acquireLocalStream,
+    toggleAudio,
+    toggleVideo,
+    startScreenShare,
+    stopScreenShare,
+    stopAllMedia,
+  } = useMediaDevices();
 
   const {
     remoteStream,
@@ -117,7 +111,11 @@ export function CallProvider({ children }) {
     replaceVideoTrack,
     restartIce,
     closeConnection,
-  } = webrtc;
+  } = useWebRTC({
+    socket,
+    onPeerMediaToggle: handlePeerMediaToggle,
+    onConnectionStateChange: handleConnectionStateChange,
+  });
 
   // Is the other person talking? (real loudness from their audio stream)
   const { isSpeaking: peerSpeaking, levelRef: peerLevelRef } =
