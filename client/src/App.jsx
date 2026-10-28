@@ -1,21 +1,24 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+
 import { AuthProvider } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
+import { SocketProvider } from "@/context/SocketContext";
+import { E2EEProvider } from "@/features/e2ee/E2EEContext";
+import { CallProvider } from "@/context/CallContext";
+
 import { ProtectedRoute } from "@/routes/ProtectedRoute";
+
+import { NotificationManager } from "@/features/chat/NotificationManager";
+import { IncomingCallDialog } from "@/features/videoCall/IncomingCallDialog";
+import { CallModal } from "@/features/videoCall/CallModal";
+
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import Dashboard from "@/pages/Dashboard";
 import Profile from "@/pages/Profile";
 import OAuthCallback from "@/pages/OAuthCallback";
 
-import { SocketProvider } from "@/context/SocketContext";
-import { ThemeProvider } from "@/context/ThemeContext";
-import { E2EEProvider } from "@/features/e2ee/E2EEContext";
-import { CallProvider } from "@/context/CallContext";
-import { IncomingCallDialog } from "@/features/videoCall/IncomingCallDialog";
-import { CallModal } from "@/features/videoCall/CallModal";
-
-import { NotificationManager } from "@/features/chat/NotificationManager";
 import { Toaster } from "@/components/ui/sonner";
 
 export default function App() {
