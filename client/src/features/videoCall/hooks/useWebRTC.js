@@ -400,20 +400,21 @@ export function useWebRTC({
 
   const replaceVideoTrack = useCallback(async (newTrack) => {
     const pc = pcRef.current;
-    if (!pc) return;
+    if (!pc) return false;
 
     const transceiver = pc
       .getTransceivers()
       .find((t) => t.receiver.track.kind === "video");
     if (!transceiver) {
       console.warn("[webrtc] no video m-line negotiated; cannot swap track");
-      return;
+      return false;
     }
     if (transceiver.direction !== "sendrecv")
       transceiver.direction = "sendrecv";
 
     await transceiver.sender.replaceTrack(newTrack);
     if (newTrack) await applySenderQuality(pc, qualityRef.current);
+    return true; // callers (screen share) rely on this to detect a failed hand-off
   }, []);
 
   const closeConnection = useCallback(() => {

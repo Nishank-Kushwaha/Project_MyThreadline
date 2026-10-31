@@ -66,6 +66,9 @@ export function useMediaDevices() {
   const screenTrackRef = useRef(null);
   const originalVideoTrackRef = useRef(null);
   const shareHandlersRef = useRef({ replaceTrackFn: null, notify: null });
+  const startingShareRef = useRef(false); // a share is being set up (blocks double clicks)
+  const stoppingShareRef = useRef(false); // a stop is running (blocks button + browser banner racing)
+  const mediaEpochRef = useRef(0); // bumped when media is torn down; lets async work detect "the call ended"
 
   const enumerateDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -190,43 +193,88 @@ export function useMediaDevices() {
     return nextEnabled;
   }, []);
 
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * Stops sharing and gives the call its camera back.
+   * Best effort and NEVER throws: the local side is always cleaned up first, so
+   * the UI can't get stuck in "sharing" even if the network side fails.
+   */
   const stopScreenShare = useCallback(async (replaceTrackFn, notify) => {
+    // Nothing to stop, or a stop is already running (button + browser banner at once)
+    if (!screenTrackRef.current || stoppingShareRef.current) return false;
+    stoppingShareRef.current = true;
+
     const replace = replaceTrackFn || shareHandlersRef.current.replaceTrackFn;
     const notifyFn = notify || shareHandlersRef.current.notify;
+    const original = originalVideoTrackRef.current;
+    const cameraOk = Boolean(original && original.readyState === "live");
+    let restored = true;
 
-    if (screenTrackRef.current) {
+    try {
+      // 1) Local side first (cannot fail)
       screenTrackRef.current.onended = null;
       screenTrackRef.current.stop();
       screenTrackRef.current = null;
-    }
 
-    const original = originalVideoTrackRef.current;
-    const cameraOk = Boolean(original && original.readyState === "live");
-    const stream = localStreamRef.current;
-
-    if (stream) {
-      stream.getVideoTracks().forEach((t) => {
-        if (t !== original) stream.removeTrack(t);
-      });
-      if (cameraOk && !stream.getVideoTracks().includes(original)) {
-        stream.addTrack(original);
+      const stream = localStreamRef.current;
+      if (stream) {
+        stream.getVideoTracks().forEach((t) => {
+          if (t !== original) stream.removeTrack(t);
+        });
+        if (cameraOk && !stream.getVideoTracks().includes(original)) {
+          stream.addTrack(original);
+        }
+        setLocalStream(new MediaStream(stream.getTracks()));
       }
-      setLocalStream(new MediaStream(stream.getTracks()));
-    }
 
-    if (typeof replace === "function") {
-      await replace(cameraOk ? original : null);
+      // 2) Hand the camera back to the peer connection (one retry)
+      if (typeof replace === "function") {
+        restored = false;
+        for (let attempt = 0; attempt < 2 && !restored; attempt += 1) {
+          try {
+            restored = (await replace(cameraOk ? original : null)) !== false;
+          } catch (err) {
+            console.warn(
+              "[devices] restoring camera after screen share failed:",
+              err,
+            );
+          }
+          if (!restored && attempt === 0) await sleep(300);
+        }
+        if (!restored) {
+          console.warn(
+            "[devices] could not restore the camera on the peer connection",
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("[devices] stopScreenShare error:", err);
+      restored = false;
+    } finally {
+      // Always leave a consistent state, whatever happened above
+      const cameraOn = Boolean(cameraOk && original && original.enabled);
+      try {
+        notifyFn?.("video", cameraOn);
+        notifyFn?.("screen", false);
+      } catch (err) {
+        console.warn("[devices] notify failed:", err);
+      }
+      setIsVideoDisabled(!cameraOn);
+      originalVideoTrackRef.current = null;
+      shareHandlersRef.current = { replaceTrackFn: null, notify: null };
+      setIsScreenSharing(false);
+      stoppingShareRef.current = false;
     }
-
-    const cameraOn = cameraOk && original.enabled;
-    notifyFn?.("video", cameraOn);
-    notifyFn?.("screen", false);
-    setIsVideoDisabled(!cameraOn);
-    originalVideoTrackRef.current = null;
-    shareHandlersRef.current = { replaceTrackFn: null, notify: null };
-    setIsScreenSharing(false);
+    return restored;
   }, []);
 
+  /**
+   * Starts sharing. Order matters: the screen track is handed to the peer
+   * connection FIRST; the local stream and UI state change only after that
+   * succeeded. If anything fails, everything acquired is released and the
+   * camera is put back, so a failed attempt leaves no trace and can be retried.
+   */
   const startScreenShare = useCallback(
     async (replaceTrackFn, notify) => {
       if (!navigator.mediaDevices?.getDisplayMedia) {
@@ -234,55 +282,145 @@ export function useMediaDevices() {
           "Screen sharing is not supported on this device/browser.",
         );
       }
-      if (screenTrackRef.current) return null;
-
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          frameRate: { ideal: 15, max: 30 },
-          width: { max: 1920 },
-          height: { max: 1080 },
-        },
-        audio: false, // system audio would loop back into the call as echo
-      });
-
-      const screenTrack = screenStream.getVideoTracks()[0];
-      try {
-        screenTrack.contentHint = "detail";
-      } catch {
-        /* unsupported */
+      // Already sharing, or a start/stop is in progress (double click)
+      if (
+        screenTrackRef.current ||
+        startingShareRef.current ||
+        stoppingShareRef.current
+      ) {
+        return null;
       }
-      screenTrackRef.current = screenTrack;
-      shareHandlersRef.current = { replaceTrackFn, notify };
 
-      const stream = localStreamRef.current || new MediaStream();
-      const existing = stream.getVideoTracks()[0];
-      if (existing) {
-        originalVideoTrackRef.current = existing;
-        stream.removeTrack(existing);
-      }
-      stream.addTrack(screenTrack);
-      localStreamRef.current = stream;
-      setLocalStream(new MediaStream(stream.getTracks()));
+      startingShareRef.current = true;
+      const epoch = mediaEpochRef.current;
+      let screenStream = null;
+      let screenTrack = null;
+      let handedToPeer = false;
 
-      if (typeof replaceTrackFn === "function") {
-        await replaceTrackFn(screenTrack);
-      }
-      notify?.("video", true);
-      notify?.("screen", true); // lets the viewer skip mirroring/cropping
+      const rollback = async () => {
+        if (screenTrack) {
+          screenTrack.onended = null;
+          screenTrack.stop();
+        }
+        screenStream?.getTracks().forEach((t) => t.stop());
+        if (screenTrackRef.current === screenTrack)
+          screenTrackRef.current = null;
+        shareHandlersRef.current = { replaceTrackFn: null, notify: null };
 
-      // User clicked the browser's "Stop sharing" banner
-      screenTrack.onended = () => {
-        stopScreenShare();
+        // The peer connection already switched to the screen: put the camera back
+        if (
+          handedToPeer &&
+          typeof replaceTrackFn === "function" &&
+          epoch === mediaEpochRef.current
+        ) {
+          const camera = localStreamRef.current?.getVideoTracks()[0];
+          try {
+            await replaceTrackFn(
+              camera && camera.readyState === "live" ? camera : null,
+            );
+          } catch (err) {
+            console.warn(
+              "[devices] could not restore camera after failed screen share:",
+              err,
+            );
+          }
+        }
       };
 
-      setIsScreenSharing(true);
-      setIsVideoDisabled(false);
-      return screenStream;
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            frameRate: { ideal: 15, max: 30 },
+            width: { max: 1920 },
+            height: { max: 1080 },
+          },
+          audio: false, // system audio would loop back into the call as echo
+        });
+
+        screenTrack = screenStream.getVideoTracks()[0];
+        if (!screenTrack)
+          throw new Error("Screen capture did not provide any video.");
+        try {
+          screenTrack.contentHint = "detail";
+        } catch {
+          /* unsupported */
+        }
+
+        // The call ended while the browser's share picker was open
+        if (epoch !== mediaEpochRef.current) {
+          await rollback();
+          return null;
+        }
+
+        screenTrackRef.current = screenTrack;
+        shareHandlersRef.current = { replaceTrackFn, notify };
+
+        // If the user clicks the browser's "Stop sharing" while we are still setting up
+        let stoppedDuringSetup = false;
+        screenTrack.onended = () => {
+          stoppedDuringSetup = true;
+        };
+
+        // 1) Network side first. If this fails, nothing local has changed yet.
+        if (typeof replaceTrackFn === "function") {
+          const ok = await replaceTrackFn(screenTrack);
+          if (ok === false) {
+            throw new Error(
+              "Couldn't start screen sharing because the call isn't connected yet.",
+            );
+          }
+          handedToPeer = true;
+        }
+
+        if (
+          stoppedDuringSetup ||
+          screenTrack.readyState === "ended" ||
+          epoch !== mediaEpochRef.current
+        ) {
+          await rollback();
+          return null;
+        }
+
+        // 2) Commit local state (synchronous, cannot fail)
+        const stream = localStreamRef.current || new MediaStream();
+        const existing = stream.getVideoTracks()[0];
+        if (existing) {
+          originalVideoTrackRef.current = existing;
+          stream.removeTrack(existing);
+        }
+        stream.addTrack(screenTrack);
+        localStreamRef.current = stream;
+        setLocalStream(new MediaStream(stream.getTracks()));
+
+        screenTrack.onended = () => {
+          stopScreenShare(); // browser "Stop sharing" banner
+        };
+
+        setIsScreenSharing(true);
+        setIsVideoDisabled(false);
+
+        try {
+          notify?.("video", true);
+          notify?.("screen", true); // lets the viewer skip mirroring/cropping
+        } catch (err) {
+          console.warn("[devices] notify failed:", err);
+        }
+        return screenStream;
+      } catch (err) {
+        await rollback();
+        if (err?.name !== "NotAllowedError") {
+          console.error("[devices] Screen sharing error:", err);
+        }
+        throw err;
+      } finally {
+        startingShareRef.current = false;
+      }
     },
     [stopScreenShare],
   );
 
   const stopAllMedia = useCallback(() => {
+    mediaEpochRef.current += 1; // anything still awaiting (share picker, negotiation) must now back off
     if (screenTrackRef.current) {
       screenTrackRef.current.onended = null;
       screenTrackRef.current.stop();
