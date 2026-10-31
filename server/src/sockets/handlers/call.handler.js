@@ -37,7 +37,7 @@ const SWEEP_INTERVAL_MS = num(process.env.CALL_SWEEP_INTERVAL_MS, 60_000);
 
 const MAX_SDP_LENGTH = 100_000;
 const CALL_TYPES = new Set(["audio", "video"]);
-const MEDIA_KINDS = new Set(["audio", "video", "screen"]);
+const MEDIA_KINDS = new Set(["audio", "video", "screen", "rearcam"]);
 
 // callId -> session
 // session = {

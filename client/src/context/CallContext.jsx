@@ -34,6 +34,7 @@ export function CallProvider({ children }) {
     isAudioMuted: false,
     isVideoDisabled: false,
     isScreenSharing: false,
+    isRearCamera: false,
   });
 
   // Source of truth for event handlers (updated synchronously, never stale)
@@ -50,6 +51,39 @@ export function CallProvider({ children }) {
   const actionsRef = useRef({});
   const [peerReconnecting, setPeerReconnecting] = useState(false);
   const failTimerRef = useRef(null);
+
+  const {
+    startOutgoingRingback,
+    startIncomingRingtone,
+    playCallEndTone,
+    stopSound,
+  } = useCallSound();
+
+  const {
+    localStream,
+    getLocalStream,
+    isAudioMuted,
+    isVideoDisabled,
+    isScreenSharing,
+    acquireLocalStream,
+    toggleAudio,
+    toggleVideo,
+    startScreenShare,
+    stopScreenShare,
+    stopAllMedia,
+    availableDevices,
+    selectedDevices,
+    cameraFacing,
+    canFlipCamera,
+    supportsOutputSelection,
+    deviceNotice,
+    refreshDevices,
+    switchMicrophone,
+    switchCamera,
+    flipCamera,
+    setAudioOutput,
+    peerBindingsRef,
+  } = useMediaDevices();
 
   const handlePeerMediaToggle = useCallback(({ kind, enabled }) => {
     setPeerMediaState((prev) => ({
@@ -79,26 +113,11 @@ export function CallProvider({ children }) {
     }
   }, []);
 
-  const {
-    startOutgoingRingback,
-    startIncomingRingtone,
-    playCallEndTone,
-    stopSound,
-  } = useCallSound();
-
-  const {
-    localStream,
-    getLocalStream,
-    isAudioMuted,
-    isVideoDisabled,
-    isScreenSharing,
-    acquireLocalStream,
-    toggleAudio,
-    toggleVideo,
-    startScreenShare,
-    stopScreenShare,
-    stopAllMedia,
-  } = useMediaDevices();
+  const webrtc = useWebRTC({
+    socket,
+    onPeerMediaToggle: handlePeerMediaToggle,
+    onConnectionStateChange: handleConnectionStateChange,
+  });
 
   const {
     remoteStream,
@@ -109,13 +128,10 @@ export function CallProvider({ children }) {
     handleAnswer,
     handleRemoteIceCandidate,
     replaceVideoTrack,
+    replaceAudioTrack,
     restartIce,
     closeConnection,
-  } = useWebRTC({
-    socket,
-    onPeerMediaToggle: handlePeerMediaToggle,
-    onConnectionStateChange: handleConnectionStateChange,
-  });
+  } = webrtc;
 
   // Is the other person talking? (real loudness from their audio stream)
   const { isSpeaking: peerSpeaking, levelRef: peerLevelRef } =
@@ -171,6 +187,7 @@ export function CallProvider({ children }) {
       isAudioMuted: false,
       isVideoDisabled: false,
       isScreenSharing: false,
+      isRearCamera: false,
     });
   }, [closeConnection, stopAllMedia, stopSound]);
 
@@ -327,6 +344,56 @@ export function CallProvider({ children }) {
     [socket],
   );
 
+  // How the device picker pushes a new microphone / camera onto the live call
+  peerBindingsRef.current = {
+    replaceAudioTrack,
+    // "optional": before the call connects there is nothing to update yet, and that is fine
+    replaceVideoTrack: (track) => replaceVideoTrack(track, { optional: true }),
+    notify: notifyPeer,
+  };
+
+  const changeMicrophone = useCallback(
+    async (deviceId) => {
+      try {
+        await switchMicrophone(deviceId);
+      } catch (err) {
+        toast.error(err.message || "Couldn't switch the microphone.");
+      }
+    },
+    [switchMicrophone],
+  );
+
+  const changeCamera = useCallback(
+    async (deviceId) => {
+      try {
+        await switchCamera(deviceId);
+      } catch (err) {
+        toast.error(err.message || "Couldn't switch the camera.");
+      }
+    },
+    [switchCamera],
+  );
+
+  const flipCameraSafe = useCallback(async () => {
+    try {
+      await flipCamera();
+    } catch (err) {
+      toast.error(err.message || "Couldn't flip the camera.");
+    }
+  }, [flipCamera]);
+
+  // Automatic events from the media layer (device unplugged, fell back to default...)
+  useEffect(() => {
+    if (!deviceNotice) return;
+    const show = deviceNotice.level === "error" ? toast.error : toast.warning;
+    show(deviceNotice.message, { id: "device-notice" });
+  }, [deviceNotice]);
+
+  const handleOutputError = useCallback(() => {
+    setAudioOutput("");
+    toast.warning("That speaker isn't available. Using the default speaker.");
+  }, [setAudioOutput]);
+
   const handleToggleMic = useCallback(() => {
     notifyPeer("audio", toggleAudio());
   }, [notifyPeer, toggleAudio]);
@@ -382,6 +449,7 @@ export function CallProvider({ children }) {
       notifyPeer("audio", !isAudioMuted);
       notifyPeer("video", !isVideoDisabled);
       if (isScreenSharing) notifyPeer("screen", true);
+      if (cameraFacing === "environment") notifyPeer("rearcam", true);
     },
   };
 
@@ -522,6 +590,8 @@ export function CallProvider({ children }) {
       setPeerMediaState((prev) => {
         if (kind === "screen")
           return { ...prev, isScreenSharing: Boolean(enabled) };
+        if (kind === "rearcam")
+          return { ...prev, isRearCamera: Boolean(enabled) };
         return {
           ...prev,
           [kind === "audio" ? "isAudioMuted" : "isVideoDisabled"]: !enabled,
@@ -631,6 +701,16 @@ export function CallProvider({ children }) {
     selfSpeaking,
     selfLevelRef,
     peerReconnecting,
+    availableDevices,
+    selectedDevices,
+    cameraFacing,
+    canFlipCamera,
+    supportsOutputSelection,
+    refreshDevices,
+    changeMicrophone,
+    changeCamera,
+    flipCamera: flipCameraSafe,
+    changeSpeaker: setAudioOutput,
     isAudioMuted,
     isVideoDisabled,
     isScreenSharing,
@@ -647,7 +727,11 @@ export function CallProvider({ children }) {
   return (
     <CallContext.Provider value={value}>
       {/* Single, always-mounted remote audio sink */}
-      <RemoteAudio stream={remoteStream} />
+      <RemoteAudio
+        stream={remoteStream}
+        outputDeviceId={selectedDevices.audioOutputId}
+        onOutputError={handleOutputError}
+      />
       {children}
     </CallContext.Provider>
   );

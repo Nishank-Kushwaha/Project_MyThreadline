@@ -7,12 +7,15 @@ import {
   ScreenShare,
   PhoneOff,
   Minimize2,
+  Maximize2,
 } from "lucide-react";
+import { DevicePicker } from "./DevicePicker";
 
 export function CallControls({
   isAudioMuted,
   isVideoDisabled,
   isScreenSharing,
+  isMinimized,
   callType,
   onToggleMic,
   onToggleCamera,
@@ -23,7 +26,7 @@ export function CallControls({
   const supportsScreenShare = Boolean(navigator.mediaDevices?.getDisplayMedia);
 
   return (
-    <div className="flex items-center justify-center gap-3 rounded-full bg-background/80 p-2.5 shadow-2xl backdrop-blur-xl border border-border/40">
+    <div className="relative flex items-center justify-center gap-3 rounded-full bg-background/80 p-2.5 shadow-2xl backdrop-blur-xl border border-border/40">
       {/* Toggle Microphone */}
       <button
         type="button"
@@ -63,7 +66,7 @@ export function CallControls({
       )}
 
       {/* Screen Sharing (Desktop / Supported browsers) */}
-      {supportsScreenShare && callType === "video" && (
+      {supportsScreenShare && callType === "video" && !isMinimized && (
         <button
           type="button"
           onClick={onToggleScreenShare}
@@ -78,14 +81,21 @@ export function CallControls({
         </button>
       )}
 
+      {/* Audio & video device settings (microphone, camera, speaker) */}
+      <DevicePicker />
+
       {/* Minimize / Floating PiP Toggle */}
       <button
         type="button"
         onClick={onToggleMinimize}
-        aria-label="Minimize call"
+        aria-label={isMinimized ? "Maximize call" : "Minimize call"}
         className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground transition hover:bg-muted/80"
       >
-        <Minimize2 className="h-5 w-5" />
+        {isMinimized ? (
+          <Maximize2 className="h-5 w-5" />
+        ) : (
+          <Minimize2 className="h-5 w-5" />
+        )}
       </button>
 
       {/* End Call Button */}

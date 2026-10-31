@@ -225,6 +225,7 @@ export function CallModal() {
     selfSpeaking,
     selfLevelRef,
     peerReconnecting,
+    cameraFacing,
     cancelCall,
     endCall,
     toggleMic,
@@ -263,6 +264,7 @@ export function CallModal() {
             peerLevelRef={peerLevelRef}
             selfSpeaking={selfSpeaking}
             selfLevelRef={selfLevelRef}
+            cameraFacing={cameraFacing}
           />
 
           {/* Quick Expand Button */}
@@ -393,6 +395,7 @@ export function CallModal() {
           peerLevelRef={peerLevelRef}
           selfSpeaking={selfSpeaking}
           selfLevelRef={selfLevelRef}
+          cameraFacing={cameraFacing}
         />
 
         {/* Connecting / Reconnecting pill over the video */}
@@ -429,6 +432,7 @@ export function CallModal() {
           isAudioMuted={isAudioMuted}
           isVideoDisabled={isVideoDisabled}
           isScreenSharing={isScreenSharing}
+          isMinimized={isMinimized}
           callType={callType}
           onToggleMic={toggleMic}
           onToggleCamera={toggleCamera}

@@ -398,24 +398,45 @@ export function useWebRTC({
     }
   }, []);
 
-  const replaceVideoTrack = useCallback(async (newTrack) => {
+  // Swap the microphone on the live call (device picker). Returns:
+  //   true  = sent on the call,  null = no call connection yet (the new track is used when it starts),
+  //   false = could not be sent
+  const replaceAudioTrack = useCallback(async (newTrack) => {
     const pc = pcRef.current;
-    if (!pc) return false;
+    if (!pc) return null;
 
     const transceiver = pc
       .getTransceivers()
-      .find((t) => t.receiver.track.kind === "video");
-    if (!transceiver) {
-      console.warn("[webrtc] no video m-line negotiated; cannot swap track");
-      return false;
-    }
-    if (transceiver.direction !== "sendrecv")
-      transceiver.direction = "sendrecv";
+      .find((t) => t.receiver.track.kind === "audio");
+    if (!transceiver) return false;
 
     await transceiver.sender.replaceTrack(newTrack);
-    if (newTrack) await applySenderQuality(pc, qualityRef.current);
-    return true; // callers (screen share) rely on this to detect a failed hand-off
+    if (newTrack) await applySenderQuality(pc, qualityRef.current); // keep the voice bitrate cap
+    return true;
   }, []);
+
+  // `optional: true` (device picker) treats "no connection yet" as fine instead of a failure.
+  const replaceVideoTrack = useCallback(
+    async (newTrack, { optional = false } = {}) => {
+      const pc = pcRef.current;
+      if (!pc) return optional ? null : false;
+
+      const transceiver = pc
+        .getTransceivers()
+        .find((t) => t.receiver.track.kind === "video");
+      if (!transceiver) {
+        console.warn("[webrtc] no video m-line negotiated; cannot swap track");
+        return false;
+      }
+      if (transceiver.direction !== "sendrecv")
+        transceiver.direction = "sendrecv";
+
+      await transceiver.sender.replaceTrack(newTrack);
+      if (newTrack) await applySenderQuality(pc, qualityRef.current);
+      return true; // callers (screen share) rely on this to detect a failed hand-off
+    },
+    [],
+  );
 
   const closeConnection = useCallback(() => {
     setupIdRef.current++; // cancel in-flight async setups
@@ -519,6 +540,7 @@ export function useWebRTC({
     handleRemoteIceCandidate,
     restartIce,
     replaceVideoTrack,
+    replaceAudioTrack,
     closeConnection,
   };
 }

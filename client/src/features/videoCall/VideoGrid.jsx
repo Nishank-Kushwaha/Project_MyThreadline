@@ -221,6 +221,7 @@ export function VideoGrid({
   peerLevelRef = null,
   selfSpeaking = false,
   selfLevelRef = null,
+  cameraFacing = "user", // "environment" = your rear camera: show it as is, not mirrored
 }) {
   const containerRef = useRef(null);
   const localVideoRef = useRef(null);
@@ -287,7 +288,9 @@ export function VideoGrid({
   }
   const mode = fitOverride ?? autoMode; // screen shares are never auto-cropped
 
-  const mirrorRemoteVideo = mirrorRemote && !peerIsSharingScreen;
+  // Mirror a selfie-style camera like your own preview; never a screen share or the other person's REAR camera
+  const mirrorRemoteVideo =
+    mirrorRemote && !peerIsSharingScreen && !peerMediaState.isRearCamera;
   const showBackdrop =
     Boolean(hasRemoteVideo) && mode === "fit" && !peerIsSharingScreen;
 
@@ -502,7 +505,10 @@ export function VideoGrid({
               "h-full w-full",
               isScreenSharing
                 ? "bg-black object-contain"
-                : "object-cover scale-x-[-1]",
+                : cn(
+                    "object-cover",
+                    cameraFacing !== "environment" && "scale-x-[-1]",
+                  ),
               !hasLocalVideo && "hidden",
             )}
           />
