@@ -7,14 +7,12 @@ import {
   ScreenShare,
   PhoneOff,
   Minimize2,
-  Maximize2,
 } from "lucide-react";
 
 export function CallControls({
   isAudioMuted,
   isVideoDisabled,
   isScreenSharing,
-  isMinimized,
   callType,
   onToggleMic,
   onToggleCamera,
@@ -65,7 +63,7 @@ export function CallControls({
       )}
 
       {/* Screen Sharing (Desktop / Supported browsers) */}
-      {supportsScreenShare && callType === "video" && !isMinimized && (
+      {supportsScreenShare && callType === "video" && (
         <button
           type="button"
           onClick={onToggleScreenShare}
@@ -84,14 +82,10 @@ export function CallControls({
       <button
         type="button"
         onClick={onToggleMinimize}
-        aria-label={isMinimized ? "Maximize call" : "Minimize call"}
+        aria-label="Minimize call"
         className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground transition hover:bg-muted/80"
       >
-        {isMinimized ? (
-          <Maximize2 className="h-5 w-5" />
-        ) : (
-          <Minimize2 className="h-5 w-5" />
-        )}
+        <Minimize2 className="h-5 w-5" />
       </button>
 
       {/* End Call Button */}

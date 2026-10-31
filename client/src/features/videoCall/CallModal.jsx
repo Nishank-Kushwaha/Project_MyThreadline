@@ -429,7 +429,6 @@ export function CallModal() {
           isAudioMuted={isAudioMuted}
           isVideoDisabled={isVideoDisabled}
           isScreenSharing={isScreenSharing}
-          isMinimized={isMinimized}
           callType={callType}
           onToggleMic={toggleMic}
           onToggleCamera={toggleCamera}
