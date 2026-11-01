@@ -26,6 +26,8 @@
    - [WebRTC Media Engine & Opus Audio Tuning](#webrtc-media-engine--opus-audio-tuning)
    - [Adaptive Network Quality & Auto-Degradation](#adaptive-network-quality--auto-degradation)
    - [Intelligent Auto-Layout & Aspect Ratio Engine](#intelligent-auto-layout--aspect-ratio-engine)
+   - [Device Picker, Mid-Call Track Swapping & Speaker Routing](#device-picker-mid-call-track-swapping--speaker-routing)
+   - [Mobile Camera Flip & Orientation Un-Mirroring](#mobile-camera-flip--orientation-un-mirroring)
    - [Race-Condition Proof State Machine & Audio Isolation](#race-condition-proof-state-machine--audio-isolation)
 7. [Tech Stack](#-tech-stack)
 8. [Getting Started](#-getting-started)
@@ -43,7 +45,7 @@ The server operates strictly as an **untrusted, zero-knowledge relay and storage
 ## 🚀 Key Application Features
 
 * **📹 1-on-1 Voice, Video & Screen Sharing (WebRTC):**
-  Zero-lag peer-to-peer audio and video calls encrypted via DTLS-SRTP. Powered by dynamic Metered.ca TURN & Google STUN fallback, Opus audio tuning with in-band FEC, real-time adaptive quality scaling (good/fair/poor), screen sharing with detail preservation, ambient blurred backdrops, and an isolated audio playback pipeline that prevents cutouts.
+  Zero-lag peer-to-peer audio and video calls encrypted via DTLS-SRTP. Powered by dynamic Metered.ca TURN & Google STUN fallback, Opus audio tuning with in-band FEC, real-time adaptive quality scaling (good/fair/poor), mid-call device switcher (microphone, camera, speaker) with zero SDP renegotiation, mobile front/back camera flipping with intelligent un-mirroring, screen sharing with detail preservation, ambient blurred backdrops, and an isolated audio playback pipeline that prevents cutouts.
 * **🔒 Zero-Knowledge End-to-End Encryption (E2EE):**
   ECDH P-256 key agreement with HKDF-SHA256 and AES-GCM-256 envelope encryption. Plaintext never touches the database or network in cleartext.
 * **💬 Real-Time Messaging & Sockets:**
@@ -124,15 +126,17 @@ Project/
 │   │   │   │   ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
 │   │   │   │   └── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
 │   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing module
-│   │   │       ├── CallControls.jsx         # Floating call action bar (mic, camera, share, hangup)
+│   │   │       ├── CallControls.jsx         # Floating call action bar (mic, camera, share, settings, hangup)
 │   │   │       ├── CallModal.jsx            # Fullscreen viewport, status badges & PiP container
+│   │   │       ├── DevicePicker.jsx         # Live settings popup (microphone, camera, speaker, flip)
 │   │   │       ├── IncomingCallDialog.jsx   # Radar glow incoming call modal with auto-decline
-│   │   │       ├── RemoteAudio.jsx          # Provider-level dedicated audio element (echo/dropout-free)
-│   │   │       ├── VideoGrid.jsx            # Auto-layout viewport (Aspect math, Fit/Fill & blurred backdrop)
+│   │   │       ├── RemoteAudio.jsx          # Dedicated audio sink with dynamic speaker routing (`setSinkId`)
+│   │   │       ├── VideoGrid.jsx            # Auto-layout viewport (Aspect math, Fit/Fill & un-mirrored rear cam)
 │   │   │       ├── hooks/                   # Calling hooks
 │   │   │       │   ├── useCallSound.js      # Ringtone, ringback & end call tone synthesis
-│   │   │       │   ├── useMediaDevices.js   # Camera/mic permissions, mobile constraints & screen share
-│   │   │       │   └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & ICE restart
+│   │   │       │   ├── useMediaDevices.js   # Hardware enumeration, hot-plug watch & track acquisition
+│   │   │       │   ├── useSpeakingDetector.js # Web Audio API loudness metering & active speaker detection
+│   │   │       │   └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & track replacement
 │   │   │       └── utils/
 │   │   │           └── callErrors.js        # User-friendly media device error formatter
 │   │   ├── lib/                             # Utility helpers & cryptographic engine
@@ -473,6 +477,41 @@ Video rendering is managed by [`VideoGrid.jsx`](file:///c:/CollegeProgramming/Pr
 * **Dynamic Picture-in-Picture (PiP)**: Local preview PiP automatically mirrors camera feeds (`scale-x-[-1]`), un-mirrors screen shares, and shifts its aspect ratio between portrait (mobile) and landscape (desktop).
 * **Fit/Fill Controls**: Users can double-click anywhere on the video or use the floating control button to toggle between Fit and Fill modes.
 
+### Device Picker, Mid-Call Track Swapping & Speaker Routing
+
+Call hardware is managed dynamically in real-time via [`useMediaDevices.js`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/hooks/useMediaDevices.js) and the in-call [`DevicePicker.jsx`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/DevicePicker.jsx) modal:
+
+* **Live In-Call Device Switching Popup (`<DevicePicker/>`)**:
+  * Rendered directly inside [`CallControls.jsx`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/CallControls.jsx), opening an accessible, responsive popover to switch microphones, cameras, or audio output speakers mid-call.
+  * Employs concurrency locking (`run(key, fn)`) to prevent conflicting rapid switches, with spinning indicators and green checkmarks for active hardware.
+  * Human-friendly label sanitization strips raw USB vendor/product IDs (e.g., `(04f2:b6ea)`) and formats mobile lenses clearly (`"Front camera"`, `"Rear camera 1"`).
+* **Zero-Renegotiation Track Hot-Swapping (`replaceAudioTrack` & `replaceVideoTrack`)**:
+  * Swapping microphones or cameras replaces the media track directly on the active WebRTC transceiver (`transceiver.sender.replaceTrack(newTrack)`).
+  * **No SDP Offer/Answer renegotiation is triggered**, preventing call stutter, black screens, or temporary disconnection.
+  * Immediately reapplies encoding parameters (`applySenderQuality`) to preserve the Opus 32 kbps voice limit and high network packet priority on new tracks.
+  * Supports `{ optional: true }` mode so selecting devices prior to call connection completes gracefully without throwing hand-off errors.
+* **Dynamic Audio Output Routing (`setSinkId`) & Auto-Fallback**:
+  * Routed through the dedicated `<RemoteAudio outputDeviceId={...} onOutputError={...} />` component.
+  * Passing `""` reliably switches back to the OS System Default speaker across Chromium browsers.
+  * If a Bluetooth headset or USB speaker suddenly unplugs or powers off, `onOutputError` automatically falls back to the system default speaker and alerts the user via a toast warning, preventing silent call loss.
+* **Hot-Plug Hardware Watcher (`ondevicechange`)**:
+  * Automatically detects newly connected or unplugged devices. If an in-use microphone or webcam is removed, the media layer immediately falls back to the system default device and surfaces a deduplicated alert.
+* **Active Speaker Detection & Loudness Analysis**:
+  * Handled by [`useSpeakingDetector.js`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/hooks/useSpeakingDetector.js) via the Web Audio API (`AudioContext` and `AnalyserNode`).
+  * Measures RMS loudness without connecting to the audio destination, avoiding echo loops while providing accurate visual speaking indicators on participant tiles.
+
+### Mobile Camera Flip & Orientation Un-Mirroring
+
+Smartphones and tablets require special handling for camera flipping and mirroring:
+
+* **Hardware Flip Toggle (`flipCamera()`)**:
+  * Cycles through available video inputs or applies `{ facingMode: { exact: "environment" } }` / `{ facingMode: { exact: "user" } }` constraints to seamlessly switch between selfie and rear cameras.
+* **Real-Time `"rearcam"` Signaling**:
+  * When a mobile user flips to their back camera, a `"rearcam"` media toggle socket event is emitted and verified by the server's strict `MEDIA_KINDS` whitelist (`server/src/sockets/handlers/call.handler.js`).
+* **Intelligent Un-Mirroring in [`VideoGrid.jsx`](file:///c:/CollegeProgramming/Projects/Project/client/src/features/videoCall/VideoGrid.jsx)**:
+  * **Front/Selfie Camera**: Horizontally flipped (`scale-x-[-1]`) for the local preview to feel natural like looking into a mirror.
+  * **Rear/Environment Camera**: Automatically **removes mirroring** for both the local PiP and the remote participant (`!peerMediaState.isRearCamera`). Text, documents, and real-world scenes captured with the rear camera are displayed legibly without mirror inversion.
+
 ### Race-Condition Proof State Machine & Audio Isolation
 
 * **Dedicated Audio Element (`<RemoteAudio/>`)**:
@@ -482,6 +521,9 @@ Video rendering is managed by [`VideoGrid.jsx`](file:///c:/CollegeProgramming/Pr
   * Handles browser Autoplay policy blocks by deferring playback to the next user interaction (`pointerdown`).
 * **Synchronous Ref State (`callStateRef` & `actionsRef`)**: Socket handlers in `CallContext.jsx` access state through `callStateRef.current` and callbacks through `actionsRef.current`. Socket listeners are bound once, preventing React closure staleness and re-subscription loops.
 * **Double-Click Lock & Permission Cancellation**: Outgoing calls immediately claim the `"calling"` state. If a user cancels while the browser camera/mic permission prompt is pending, tracks are torn down immediately without dangling calls.
+* **Synchronous Multi-Touch Lock & Desktop Shortcuts (`<IncomingCallDialog/>`)**:
+  * Answering or rejecting an incoming call uses a synchronous ref lock (`lockRef.current`) that executes before React re-renders, preventing double-tap or simultaneous accept/decline race conditions on mobile touchscreens.
+  * Symmetrical `try...catch` blocks ensure error resilience across both actions, with desktop keyboard shortcuts (<kbd>Enter</kbd> to accept, <kbd>Escape</kbd> to decline) and auto-dismissal timeouts.
 
 ---
 
