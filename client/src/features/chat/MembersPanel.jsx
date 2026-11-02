@@ -45,7 +45,7 @@ import {
 
 import { listUsersRequest } from "@/api/usersApi";
 
-import { useRoomVerification } from "@/features/e2ee/useVerification";
+import { useRoomVerification } from "@/features/e2ee/hooks/useVerification";
 import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
 import { toast } from "sonner";
 

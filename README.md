@@ -120,11 +120,18 @@ Project/
 │   │   │   │   ├── ReactionPills.jsx        # Aggregated reaction pill counts on bubbles
 │   │   │   │   ├── RoomList.jsx             # Left sidebar conversation list
 │   │   │   │   ├── TypingIndicator.jsx      # Real-time typing bubble
-│   │   │   │   └── VoiceRecorder.jsx        # Voice note recording interface
+│   │   │   │   ├── VoiceRecorder.jsx        # Voice note recording interface
+│   │   │   │   └── hooks/                   # Chat hooks
+│   │   │   │       ├── useBrowserNotifications.js # Browser notification permission & switch sync
+│   │   │   │       ├── useChatNotifications.js    # Unread message & room invite notification coordinator
+│   │   │   │       ├── usePushSubscription.js     # Web Push subscription lifecycle manager
+│   │   │   │       └── useVoiceRecorder.js        # Web Audio API voice note recording & volume levels
 │   │   │   ├── e2ee/                        # E2EE security UI & components
 │   │   │   │   ├── BackupSettings.jsx       # Passphrase backup / restore UI
 │   │   │   │   ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
-│   │   │   │   └── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
+│   │   │   │   ├── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
+│   │   │   │   └── hooks/                   # E2EE hooks
+│   │   │   │       └── useVerification.js   # Room device verification status & roster state
 │   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing module
 │   │   │       ├── CallControls.jsx         # Floating call action bar (mic, camera, share, settings, hangup)
 │   │   │       ├── CallModal.jsx            # Fullscreen viewport, status badges & PiP container

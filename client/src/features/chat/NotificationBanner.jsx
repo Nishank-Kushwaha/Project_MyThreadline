@@ -10,7 +10,7 @@ import {
   isStandalone,
 } from "@/lib/notifications";
 import { subscribeToPush, unsubscribeFromPush } from "@/lib/push";
-import { useBrowserNotificationsOn } from "./useBrowserNotifications";
+import { useBrowserNotificationsOn } from "./hooks/useBrowserNotifications";
 
 export function NotificationBanner() {
   const { user } = useAuth();

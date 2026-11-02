@@ -30,7 +30,7 @@ import { SystemMessage } from "./SystemMessage";
 import { EncryptionNotice } from "./EncryptionNotice";
 import { useE2EE } from "@/context/E2EEContext";
 import { KeyChangeNotice } from "./KeyChangeNotice";
-import { useRoomVerification } from "@/features/e2ee/useVerification";
+import { useRoomVerification } from "@/features/e2ee/hooks/useVerification";
 import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
 import {
   clearRoomEncryptionCache,

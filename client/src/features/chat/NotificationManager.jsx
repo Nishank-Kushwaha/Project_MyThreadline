@@ -4,8 +4,8 @@ import { useSocket } from "@/context/SocketContext";
 import {
   useChatNotifications,
   useNotificationClicks,
-} from "./useChatNotifications";
-import { usePushSubscription } from "./usePushSubscription";
+} from "./hooks/useChatNotifications";
+import { usePushSubscription } from "./hooks/usePushSubscription";
 
 // Mounted once for the whole app, so notifications and the push subscription
 // work on every page (Profile included), not only on the dashboard.

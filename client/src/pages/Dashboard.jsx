@@ -15,7 +15,7 @@ import { NotificationBanner } from "@/features/chat/NotificationBanner";
 import {
   useNotificationClicks,
   useUnreadTitle,
-} from "@/features/chat/useChatNotifications";
+} from "@/features/chat/hooks/useChatNotifications";
 import { useE2EE } from "@/context/E2EEContext";
 import { decryptPreview } from "@/lib/e2ee/messages";
 import { toast } from "sonner";
