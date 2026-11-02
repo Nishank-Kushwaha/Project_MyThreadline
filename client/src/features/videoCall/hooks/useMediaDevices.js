@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { formatMediaDeviceError } from "../utils/callErrors";
+import { formatMediaDeviceError } from "@/lib/utils";
 
 const IS_MOBILE =
   typeof navigator !== "undefined" &&

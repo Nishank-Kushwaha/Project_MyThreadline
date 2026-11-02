@@ -132,13 +132,11 @@ Project/
 │   │   │       ├── IncomingCallDialog.jsx   # Radar glow incoming call modal with auto-decline
 │   │   │       ├── RemoteAudio.jsx          # Dedicated audio sink with dynamic speaker routing (`setSinkId`)
 │   │   │       ├── VideoGrid.jsx            # Auto-layout viewport (Aspect math, Fit/Fill & un-mirrored rear cam)
-│   │   │       ├── hooks/                   # Calling hooks
-│   │   │       │   ├── useCallSound.js      # Ringtone, ringback & end call tone synthesis
-│   │   │       │   ├── useMediaDevices.js   # Hardware enumeration, hot-plug watch & track acquisition
-│   │   │       │   ├── useSpeakingDetector.js # Web Audio API loudness metering & active speaker detection
-│   │   │       │   └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & track replacement
-│   │   │       └── utils/
-│   │   │           └── callErrors.js        # User-friendly media device error formatter
+│   │   │       └── hooks/                   # Calling hooks
+│   │   │           ├── useCallSound.js      # Ringtone, ringback & end call tone synthesis
+│   │   │           ├── useMediaDevices.js   # Hardware enumeration, hot-plug watch & track acquisition
+│   │   │           ├── useSpeakingDetector.js # Web Audio API loudness metering & active speaker detection
+│   │   │           └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & track replacement
 │   │   ├── lib/                             # Utility helpers & cryptographic engine
 │   │   │   ├── e2ee/                        # Web Crypto E2EE Engine
 │   │   │   │   ├── backup.js                # PBKDF2/AES-GCM key backup export & import
