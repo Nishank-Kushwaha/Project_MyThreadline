@@ -52,6 +52,34 @@ export function CallProvider({ children }) {
   const [peerReconnecting, setPeerReconnecting] = useState(false);
   const failTimerRef = useRef(null);
 
+  const handlePeerMediaToggle = useCallback(({ kind, enabled }) => {
+    setPeerMediaState((prev) => ({
+      ...prev,
+      [kind === "audio" ? "isAudioMuted" : "isVideoDisabled"]: !enabled,
+    }));
+  }, []);
+
+  const handleConnectionStateChange = useCallback((state) => {
+    if (state === "connected") {
+      clearTimeout(failTimerRef.current);
+      failTimerRef.current = null;
+      toast.dismiss("call-net");
+      actionsRef.current.reportMediaConnected?.(); // accepted != connected: tell the server it is real
+    } else if (state === "disconnected") {
+      toast.warning("Connection unstable, reconnecting…", { id: "call-net" });
+    } else if (state === "failed") {
+      toast.error("Connection lost. Trying to recover…", { id: "call-net" });
+      // ICE restart is attempted by the WebRTC hook; give up if it does not recover
+      if (!failTimerRef.current) {
+        failTimerRef.current = setTimeout(() => {
+          failTimerRef.current = null;
+          toast.error("Call connection failed. Check your network/firewall.");
+          actionsRef.current.endCall?.();
+        }, FAILED_GRACE_MS);
+      }
+    }
+  }, []);
+
   const {
     startOutgoingRingback,
     startIncomingRingtone,
@@ -85,40 +113,6 @@ export function CallProvider({ children }) {
     peerBindingsRef,
   } = useMediaDevices();
 
-  const handlePeerMediaToggle = useCallback(({ kind, enabled }) => {
-    setPeerMediaState((prev) => ({
-      ...prev,
-      [kind === "audio" ? "isAudioMuted" : "isVideoDisabled"]: !enabled,
-    }));
-  }, []);
-
-  const handleConnectionStateChange = useCallback((state) => {
-    if (state === "connected") {
-      clearTimeout(failTimerRef.current);
-      failTimerRef.current = null;
-      toast.dismiss("call-net");
-      actionsRef.current.reportMediaConnected?.(); // accepted != connected: tell the server it is real
-    } else if (state === "disconnected") {
-      toast.warning("Connection unstable, reconnecting…", { id: "call-net" });
-    } else if (state === "failed") {
-      toast.error("Connection lost. Trying to recover…", { id: "call-net" });
-      // ICE restart is attempted by the WebRTC hook; give up if it does not recover
-      if (!failTimerRef.current) {
-        failTimerRef.current = setTimeout(() => {
-          failTimerRef.current = null;
-          toast.error("Call connection failed. Check your network/firewall.");
-          actionsRef.current.endCall?.();
-        }, FAILED_GRACE_MS);
-      }
-    }
-  }, []);
-
-  const webrtc = useWebRTC({
-    socket,
-    onPeerMediaToggle: handlePeerMediaToggle,
-    onConnectionStateChange: handleConnectionStateChange,
-  });
-
   const {
     remoteStream,
     connectionState,
@@ -131,7 +125,11 @@ export function CallProvider({ children }) {
     replaceAudioTrack,
     restartIce,
     closeConnection,
-  } = webrtc;
+  } = useWebRTC({
+    socket,
+    onPeerMediaToggle: handlePeerMediaToggle,
+    onConnectionStateChange: handleConnectionStateChange,
+  });
 
   // Is the other person talking? (real loudness from their audio stream)
   const { isSpeaking: peerSpeaking, levelRef: peerLevelRef } =
