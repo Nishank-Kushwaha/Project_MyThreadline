@@ -124,6 +124,7 @@ Project/
 │   │   │   │   └── hooks/                   # Chat hooks
 │   │   │   │       ├── useBrowserNotifications.js # Browser notification permission & switch sync
 │   │   │   │       ├── useChatNotifications.js    # Unread message & room invite notification coordinator
+│   │   │   │       ├── usePickerTheme.js          # Resolves active dark/light palette for emoji & GIF pickers
 │   │   │   │       ├── usePushSubscription.js     # Web Push subscription lifecycle manager
 │   │   │   │       └── useVoiceRecorder.js        # Web Audio API voice note recording & volume levels
 │   │   │   ├── e2ee/                        # E2EE security UI & components

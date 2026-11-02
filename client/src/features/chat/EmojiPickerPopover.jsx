@@ -1,6 +1,6 @@
 import React from "react";
 import EmojiPicker, { Theme } from "emoji-picker-react";
-import { usePickerTheme } from "@/context/usePickerTheme"; // same path as in GifPickerPopover
+import { usePickerTheme } from "./hooks/usePickerTheme";
 
 // Reuses the same overlay pattern as components/ui/dialog.jsx (backdrop +
 // centered card) rather than pixel-precise anchoring next to the bubble —

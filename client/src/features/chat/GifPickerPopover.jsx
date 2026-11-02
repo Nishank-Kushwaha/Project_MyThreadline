@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { GifPicker } from "gif-picker-react";
 import { Giphy } from "gif-picker-react/providers/giphy";
 import "gif-picker-react/style.css";
-import { usePickerTheme } from "@/context/usePickerTheme";
+import { usePickerTheme } from "./hooks/usePickerTheme";
 
 // Same overlay pattern as EmojiPickerPopover (backdrop + centered card).
 // Lazy-loaded from GifPickerButton, so it only downloads when first opened.
