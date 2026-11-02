@@ -16,7 +16,7 @@ import {
   useNotificationClicks,
   useUnreadTitle,
 } from "@/features/chat/useChatNotifications";
-import { useE2EE } from "@/features/e2ee/E2EEContext";
+import { useE2EE } from "@/context/E2EEContext";
 import { decryptPreview } from "@/lib/e2ee/messages";
 import { toast } from "sonner";
 

@@ -98,6 +98,7 @@ Project/
 │   │   ├── context/                         # React context providers
 │   │   │   ├── AuthContext.jsx              # Global authenticated user state
 │   │   │   ├── CallContext.jsx              # WebRTC call state machine & signaling coordinator
+│   │   │   ├── E2EEContext.jsx              # Device key initialization & room encryption state
 │   │   │   ├── SocketContext.jsx            # Socket.io connection lifecycle manager
 │   │   │   └── ThemeContext.jsx             # Color theme manager
 │   │   ├── features/                        # Core application feature modules
@@ -122,7 +123,6 @@ Project/
 │   │   │   │   └── VoiceRecorder.jsx        # Voice note recording interface
 │   │   │   ├── e2ee/                        # E2EE security UI & components
 │   │   │   │   ├── BackupSettings.jsx       # Passphrase backup / restore UI
-│   │   │   │   ├── E2EEContext.jsx          # Device key initialization & room encryption state
 │   │   │   │   ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
 │   │   │   │   └── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
 │   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing module

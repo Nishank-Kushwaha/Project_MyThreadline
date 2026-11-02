@@ -28,7 +28,7 @@ import { cn, formatLastSeen, formatDateSeparator } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
 import { EncryptionNotice } from "./EncryptionNotice";
-import { useE2EE } from "@/features/e2ee/E2EEContext";
+import { useE2EE } from "@/context/E2EEContext";
 import { KeyChangeNotice } from "./KeyChangeNotice";
 import { useRoomVerification } from "@/features/e2ee/useVerification";
 import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";

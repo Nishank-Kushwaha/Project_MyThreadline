@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { SocketProvider } from "@/context/SocketContext";
-import { E2EEProvider } from "@/features/e2ee/E2EEContext";
+import { E2EEProvider } from "@/context/E2EEContext";
 import { CallProvider } from "@/context/CallContext";
 
 import { ProtectedRoute } from "@/routes/ProtectedRoute";
