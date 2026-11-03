@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { useAuth } from "@/context/AuthContext";
-import { getAccessToken } from "@/api/axios";
-import { connectSocket, disconnectSocket } from "@/sockets/socket";
+import { useAuth } from "@/features/auth/context/AuthContext";
+import { getAccessToken } from "@/lib/axios";
+import { connectSocket, disconnectSocket } from "@/lib/socket";
 import { SERVER_ORIGIN } from "@/lib/utils";
 
 const SocketContext = createContext(null);

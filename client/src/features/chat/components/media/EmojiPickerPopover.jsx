@@ -1,6 +1,6 @@
 import React from "react";
 import EmojiPicker, { Theme } from "emoji-picker-react";
-import { usePickerTheme } from "./hooks/usePickerTheme";
+import { usePickerTheme } from "@/features/chat/hooks/usePickerTheme";
 
 // Reuses the same overlay pattern as components/ui/dialog.jsx (backdrop +
 // centered card) rather than pixel-precise anchoring next to the bubble —

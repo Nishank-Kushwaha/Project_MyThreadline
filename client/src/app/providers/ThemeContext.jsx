@@ -5,8 +5,8 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { useAuth } from "@/context/AuthContext";
-import { updateThemeRequest } from "@/api/usersApi";
+import { useAuth } from "@/features/auth/context/AuthContext";
+import { updateThemeRequest } from "@/features/chat/api/usersApi";
 import { applyTheme, DEFAULT_THEME, THEME_IDS } from "@/lib/themes";
 
 const ThemeContext = createContext(null);

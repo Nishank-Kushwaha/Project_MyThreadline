@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Trash2, Send, Play, Pause, Loader2, Mic } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useVoiceRecorder, MAX_SECONDS } from "./hooks/useVoiceRecorder";
+import { useVoiceRecorder, MAX_SECONDS } from "@/features/chat/hooks/useVoiceRecorder";
 
 const fmt = (s = 0) => {
   const t = Math.max(0, Math.floor(s));

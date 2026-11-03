@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { fetchIceServersRequest } from "@/api/callsApi";
+import { fetchIceServersRequest } from "@/features/videoCall/api/callsApi";
 
 const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useE2EE } from "@/context/E2EEContext";
-import { listMyDeviceKeysRequest, removeDeviceKeyRequest } from "@/api/keysApi";
-import { fingerprintOf } from "@/lib/e2ee/deviceKey";
+import { useE2EE } from "@/features/e2ee/context/E2EEContext";
+import { listMyDeviceKeysRequest, removeDeviceKeyRequest } from "@/features/e2ee/api/keysApi";
+import { fingerprintOf } from "@/features/e2ee/lib/deviceKey";
 import { cn } from "@/lib/utils";
 
 export function EncryptionStatus({ className }) {

@@ -1,23 +1,23 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
-import { useSocket } from "@/context/SocketContext";
-import { listRoomsRequest } from "@/api/roomsApi";
+import { useAuth } from "@/features/auth/context/AuthContext";
+import { useSocket } from "@/app/providers/SocketContext";
+import { listRoomsRequest } from "@/features/chat/api/roomsApi";
 import { Button } from "@/components/ui/button";
-import { RoomList } from "@/features/chat/RoomList";
-import { ChatWindow } from "@/features/chat/ChatWindow";
-import { NewChatDialog } from "@/features/chat/NewChatDialog";
+import { RoomList } from "../components/RoomList";
+import { ChatWindow } from "../components/ChatWindow";
+import { NewChatDialog } from "../components/NewChatDialog";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Menu, X, LogOut, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
-import { MembersPanel } from "@/features/chat/MembersPanel";
-import { NotificationBanner } from "@/features/chat/NotificationBanner";
+import { MembersPanel } from "../components/MembersPanel";
+import { NotificationBanner } from "@/features/notifications/components/NotificationBanner";
 import {
   useNotificationClicks,
   useUnreadTitle,
-} from "@/features/chat/hooks/useChatNotifications";
-import { useE2EE } from "@/context/E2EEContext";
-import { decryptPreview } from "@/lib/e2ee/messages";
+} from "@/features/notifications/hooks/useChatNotifications";
+import { useE2EE } from "@/features/e2ee/context/E2EEContext";
+import { decryptPreview } from "@/features/e2ee/lib/messages";
 import { toast } from "sonner";
 
 // Sidebar width limits for md+ screens (like WhatsApp Web)

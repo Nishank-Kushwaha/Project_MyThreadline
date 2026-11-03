@@ -1,5 +1,5 @@
-import { listUserDeviceKeysRequest } from "@/api/keysApi";
-import { getRoomEncryptionRequest } from "@/api/roomsApi";
+import { listUserDeviceKeysRequest } from "@/features/e2ee/api/keysApi";
+import { getRoomEncryptionRequest } from "@/features/chat/api/roomsApi";
 
 // Public keys change rarely, so they're cached briefly instead of being
 // fetched for every message.

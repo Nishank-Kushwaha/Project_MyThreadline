@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Bell, BellOff, Share } from "lucide-react";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import { cn } from "@/lib/utils";
 import {
   getNotificationPermission,
@@ -8,9 +8,9 @@ import {
   setBrowserNotificationsOn,
   isIOS,
   isStandalone,
-} from "@/lib/notifications";
-import { subscribeToPush, unsubscribeFromPush } from "@/lib/push";
-import { useBrowserNotificationsOn } from "./hooks/useBrowserNotifications";
+} from "@/features/notifications/lib/notifications";
+import { subscribeToPush, unsubscribeFromPush } from "@/features/notifications/lib/push";
+import { useBrowserNotificationsOn } from "../hooks/useBrowserNotifications";
 
 export function NotificationBanner() {
   const { user } = useAuth();

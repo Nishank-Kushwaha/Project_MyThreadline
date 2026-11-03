@@ -5,15 +5,15 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { setAccessToken, setSessionExpiredHandler } from "@/api/axios";
+import { setAccessToken, setSessionExpiredHandler } from "@/lib/axios";
 import {
   registerRequest,
   loginRequest,
   logoutRequest,
   meRequest,
   refreshRequest,
-} from "@/api/authApi";
-import { unsubscribeFromPush } from "@/lib/push";
+} from "@/features/auth/api/authApi";
+import { unsubscribeFromPush } from "@/features/notifications/lib/push";
 
 const AuthContext = createContext(null);
 

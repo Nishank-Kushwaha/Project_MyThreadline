@@ -18,8 +18,8 @@ import {
   Phone,
   Video,
 } from "lucide-react";
-import { useCall } from "@/context/CallContext";
-import { getRoomMessagesRequest } from "@/api/roomsApi";
+import { useCall } from "@/features/videoCall/context/CallContext";
+import { getRoomMessagesRequest } from "@/features/chat/api/roomsApi";
 import { MessageBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { MessageSearchBar } from "./MessageSearchBar";
@@ -27,15 +27,15 @@ import { TypingIndicator } from "./TypingIndicator";
 import { cn, formatLastSeen, formatDateSeparator } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { SystemMessage } from "./SystemMessage";
-import { EncryptionNotice } from "./EncryptionNotice";
-import { useE2EE } from "@/context/E2EEContext";
-import { KeyChangeNotice } from "./KeyChangeNotice";
+import { EncryptionNotice } from "@/features/e2ee/components/EncryptionNotice";
+import { useE2EE } from "@/features/e2ee/context/E2EEContext";
+import { KeyChangeNotice } from "@/features/e2ee/components/KeyChangeNotice";
 import { useRoomVerification } from "@/features/e2ee/hooks/useVerification";
-import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
+import { SafetyNumberDialog } from "@/features/e2ee/components/SafetyNumberDialog";
 import {
   clearRoomEncryptionCache,
   getRoomEncryption,
-} from "@/lib/e2ee/directory";
+} from "@/features/e2ee/lib/directory";
 import {
   buildOutgoingMessage,
   buildPollVoteRequest,
@@ -44,14 +44,14 @@ import {
   decryptMessages,
   decryptPollVotes,
   decryptReactions,
-} from "@/lib/e2ee/messages";
+} from "@/features/e2ee/lib/messages";
 import {
   cacheDecryptedMessages,
   searchLocalMessages,
   removeCachedMessage,
-} from "@/lib/e2ee/messageStore";
-import { encryptMedia } from "@/lib/e2ee/media";
-import { uploadMediaRequest } from "@/api/mediaApi";
+} from "@/features/e2ee/lib/messageStore";
+import { encryptMedia } from "@/features/e2ee/lib/media";
+import { uploadMediaRequest } from "@/features/chat/api/mediaApi";
 import { toast } from "sonner";
 
 const TYPING_IDLE_MS = 1500; // I stop typing => tell others after this much silence

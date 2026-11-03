@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Check } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
+import { useTheme } from "@/app/providers/ThemeContext";
 import { THEMES } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 

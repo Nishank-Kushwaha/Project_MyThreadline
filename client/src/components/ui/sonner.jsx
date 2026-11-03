@@ -1,6 +1,6 @@
 import React from "react";
 import { Toaster as Sonner } from "sonner";
-import { useTheme } from "@/context/ThemeContext";
+import { useTheme } from "@/app/providers/ThemeContext";
 
 export function Toaster(props) {
   const { theme } = useTheme();

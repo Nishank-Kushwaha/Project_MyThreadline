@@ -1,8 +1,8 @@
 import React, { useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { setAccessToken } from "@/api/axios";
-import { meRequest } from "@/api/authApi";
-import { useAuth } from "@/context/AuthContext";
+import { setAccessToken } from "@/lib/axios";
+import { meRequest } from "@/features/auth/api/authApi";
+import { useAuth } from "@/features/auth/context/AuthContext";
 
 export default function OAuthCallback() {
   const [params] = useSearchParams();

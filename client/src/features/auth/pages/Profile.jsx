@@ -1,13 +1,13 @@
 import React, { useState, useEffect, lazy, Suspense } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import {
   updateProfileRequest,
   changePasswordRequest,
   uploadAvatarRequest,
   removeAvatarRequest,
   updateNotificationSettingsRequest,
-} from "@/api/usersApi";
+} from "@/features/chat/api/usersApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,12 +37,12 @@ import {
   Lock,
   Check,
 } from "lucide-react";
-import ThemePicker from "@/components/ui/ThemePicker";
-import { EncryptionStatus } from "@/features/e2ee/EncryptionStatus";
-import { BackupSettings } from "@/features/e2ee/BackupSettings";
+import ThemePicker from "@/components/common/ThemePicker";
+import { EncryptionStatus } from "@/features/e2ee/components/EncryptionStatus";
+import { BackupSettings } from "@/features/e2ee/components/BackupSettings";
 
 // Lazy-loaded so the full DiceBear collection stays out of your main bundle
-const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
+const AvatarPicker = lazy(() => import("@/components/common/AvatarPicker"));
 
 /* ------------------------------------------------------------------ */
 /* Shared style helpers                                                */

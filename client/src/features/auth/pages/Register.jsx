@@ -1,7 +1,7 @@
 // src/pages/Register.jsx — same pattern, one more field
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { DriftingBubbles } from "@/components/magicui/drifting-bubbles";
+import { DriftingBubbles } from "@/components/common/drifting-bubbles";
 import { toast } from "sonner";
 import { getSystemTheme } from "@/lib/themes";
 

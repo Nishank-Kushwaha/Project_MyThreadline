@@ -1,6 +1,6 @@
 import { io } from "socket.io-client";
-import { getAccessToken, refreshAccessToken } from "@/api/axios";
-import { getDeviceId } from "@/lib/notifications";
+import { getAccessToken, refreshAccessToken } from "./axios";
+import { getDeviceId } from "@/features/notifications/lib/notifications";
 
 // One socket for the whole app; components get it through SocketContext.
 let socket = null;

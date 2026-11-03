@@ -1,4 +1,4 @@
-import api from "./axios";
+import api from "@/lib/axios";
 
 export const updateProfileRequest = (data) => api.patch("/users/me", data);
 export const changePasswordRequest = (data) =>

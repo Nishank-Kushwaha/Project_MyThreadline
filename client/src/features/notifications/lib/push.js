@@ -2,12 +2,12 @@ import {
   getPushPublicKeyRequest,
   subscribePushRequest,
   unsubscribePushRequest,
-} from "@/api/pushApi";
+} from "@/features/notifications/api/pushApi";
 import {
   getNotificationPermission,
   getDeviceId,
   isBrowserNotificationsOn,
-} from "@/lib/notifications";
+} from "@/features/notifications/lib/notifications";
 
 export function isPushSupported() {
   return (

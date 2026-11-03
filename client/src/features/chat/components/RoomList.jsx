@@ -2,7 +2,7 @@ import React from "react";
 import { cn, resolveAvatarUrl } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { getSystemText } from "./SystemMessage";
-import { ENCRYPTED_PREVIEW } from "@/lib/e2ee/messages";
+import { ENCRYPTED_PREVIEW } from "@/features/e2ee/lib/messages";
 
 export function RoomList({
   rooms,

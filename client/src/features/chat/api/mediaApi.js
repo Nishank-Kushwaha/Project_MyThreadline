@@ -1,4 +1,4 @@
-import api from "./axios";
+import api from "@/lib/axios";
 
 /**
  * Uploads media (encrypted blob or unencrypted file) to the server.

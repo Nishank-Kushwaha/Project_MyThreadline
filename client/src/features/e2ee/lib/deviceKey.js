@@ -1,8 +1,8 @@
-import { getDeviceId } from "@/lib/notifications";
+import { getDeviceId } from "@/features/notifications/lib/notifications";
 import {
   listMyDeviceKeysRequest,
   publishDeviceKeyRequest,
-} from "@/api/keysApi";
+} from "@/features/e2ee/api/keysApi";
 import { base64UrlToBytes, bytesToBase64Url } from "./encoding";
 import { getDeviceKeyRecord, saveDeviceKeyRecord } from "./keyStore";
 

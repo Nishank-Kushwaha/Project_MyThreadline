@@ -16,13 +16,13 @@ import {
   Mic,
   BarChart2,
 } from "lucide-react";
-import { formatFileSize } from "@/lib/e2ee/media";
+import { formatFileSize } from "@/features/e2ee/lib/media";
 
-import { GifPickerButton } from "./GifPickerButton";
+import { GifPickerButton } from "./media/GifPickerButton";
 import { gifToFile } from "@/lib/utils";
 import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
-import { VoiceRecorder } from "./VoiceRecorder";
-import { CreatePollDialog } from "./CreatePollDialog";
+import { VoiceRecorder } from "./media/VoiceRecorder";
+import { CreatePollDialog } from "./polls/CreatePollDialog";
 import { toast } from "sonner";
 
 // 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.

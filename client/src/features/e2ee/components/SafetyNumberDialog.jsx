@@ -9,9 +9,9 @@ import {
   formatSafetyNumber,
   parseSafetyNumber,
   safetyQrText,
-} from "@/lib/e2ee/safety";
-import { removeVerification, saveVerification } from "@/lib/e2ee/verification";
-import { fingerprintOf } from "@/lib/e2ee/deviceKey";
+} from "@/features/e2ee/lib/safety";
+import { removeVerification, saveVerification } from "@/features/e2ee/lib/verification";
+import { fingerprintOf } from "@/features/e2ee/lib/deviceKey";
 import { toast } from "sonner";
 
 const signatureOf = (devices) =>

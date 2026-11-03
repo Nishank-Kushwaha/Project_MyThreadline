@@ -1,11 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "@/context/AuthContext";
-import { useSocket } from "@/context/SocketContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
+import { useSocket } from "@/app/providers/SocketContext";
 import {
   useChatNotifications,
   useNotificationClicks,
-} from "./hooks/useChatNotifications";
-import { usePushSubscription } from "./hooks/usePushSubscription";
+} from "../hooks/useChatNotifications";
+import { usePushSubscription } from "../hooks/usePushSubscription";
 
 // Mounted once for the whole app, so notifications and the push subscription
 // work on every page (Profile included), not only on the dashboard.

@@ -12,8 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { useAuth } from "@/context/AuthContext";
-import { useE2EE } from "@/context/E2EEContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
+import { useE2EE } from "@/features/e2ee/context/E2EEContext";
 import {
   changeBackupPassphrase,
   checkPassphrase,
@@ -21,7 +21,7 @@ import {
   generatePassphrase,
   getBackupStatus,
   restoreBackup,
-} from "@/lib/e2ee/backup";
+} from "@/features/e2ee/lib/backup";
 
 function PassphraseField({ id, label, value, onChange, show, disabled }) {
   return (

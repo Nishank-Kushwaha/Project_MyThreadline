@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Lock, PhoneOff, Maximize2, ShieldCheck, Loader2 } from "lucide-react";
-import { useCall } from "@/context/CallContext";
-import { useAuth } from "@/context/AuthContext";
+import { useCall } from "@/features/videoCall/context/CallContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import { cn } from "@/lib/utils";
 import { VideoGrid } from "./VideoGrid";
 import { CallControls } from "./CallControls";

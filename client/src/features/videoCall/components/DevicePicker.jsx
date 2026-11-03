@@ -8,7 +8,7 @@ import {
   Loader2,
   SwitchCamera,
 } from "lucide-react";
-import { useCall } from "@/context/CallContext";
+import { useCall } from "@/features/videoCall/context/CallContext";
 import { cn } from "@/lib/utils";
 
 const FRONT = /front/i;

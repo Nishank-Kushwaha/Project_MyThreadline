@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   BROWSER_NOTIFICATIONS_EVENT,
   isBrowserNotificationsOn,
-} from "@/lib/notifications";
+} from "@/features/notifications/lib/notifications";
 
 // Re-renders when this browser's switch changes, here or in another tab.
 export function useBrowserNotificationsOn() {

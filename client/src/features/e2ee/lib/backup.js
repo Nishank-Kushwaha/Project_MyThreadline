@@ -12,7 +12,7 @@ import {
   changeBackupPassphraseRequest,
   createBackupRequest,
   getBackupRequest,
-} from "@/api/keysApi";
+} from "@/features/e2ee/api/keysApi";
 
 const encoder = new TextEncoder();
 const CURVE = { name: "ECDH", namedCurve: "P-256" };

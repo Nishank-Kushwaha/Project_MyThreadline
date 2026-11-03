@@ -41,16 +41,16 @@ import {
   updateGroupAvatarRequest,
   removeGroupAvatarRequest,
   leaveRoomRequest,
-} from "@/api/roomsApi";
+} from "@/features/chat/api/roomsApi";
 
-import { listUsersRequest } from "@/api/usersApi";
+import { listUsersRequest } from "@/features/chat/api/usersApi";
 
 import { useRoomVerification } from "@/features/e2ee/hooks/useVerification";
-import { SafetyNumberDialog } from "@/features/e2ee/SafetyNumberDialog";
+import { SafetyNumberDialog } from "@/features/e2ee/components/SafetyNumberDialog";
 import { toast } from "sonner";
 
 // Lazy-loaded so the DiceBear collection stays out of the main bundle.
-const AvatarPicker = lazy(() => import("@/components/ui/AvatarPicker"));
+const AvatarPicker = lazy(() => import("@/components/common/AvatarPicker"));
 
 const MAX_GROUP_NAME = 50;
 

@@ -6,14 +6,14 @@ import React, {
   useState,
   useRef,
 } from "react";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth } from "@/features/auth/context/AuthContext";
 import {
   ensureDeviceKey,
   fingerprintOf,
   isE2EESupported,
-} from "@/lib/e2ee/deviceKey";
-import { clearIdentityCache } from "@/lib/e2ee/identity";
-import { clearKeyDirectoryCache } from "@/lib/e2ee/directory";
+} from "@/features/e2ee/lib/deviceKey";
+import { clearIdentityCache } from "@/features/e2ee/lib/identity";
+import { clearKeyDirectoryCache } from "@/features/e2ee/lib/directory";
 
 const E2EEContext = createContext(null);
 const CHANNEL_NAME = "threadline-e2ee";

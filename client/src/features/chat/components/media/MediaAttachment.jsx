@@ -27,7 +27,7 @@ import {
   Maximize2,
   Mic,
 } from "lucide-react";
-import { decryptMedia, formatFileSize } from "@/lib/e2ee/media";
+import { decryptMedia, formatFileSize } from "@/features/e2ee/lib/media";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 

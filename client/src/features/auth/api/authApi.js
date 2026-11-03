@@ -1,5 +1,5 @@
 // src/api/authApi.js
-import api from "./axios";
+import api from "@/lib/axios";
 
 export const registerRequest = (data) => api.post("/auth/register", data);
 export const loginRequest = (data) => api.post("/auth/login", data);

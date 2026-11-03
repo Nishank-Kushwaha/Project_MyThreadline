@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { resolveAvatarUrl } from "@/lib/utils";
-import { showNotification } from "@/lib/notifications";
+import { showNotification } from "@/features/notifications/lib/notifications";
 import { useBrowserNotificationsOn } from "./useBrowserNotifications";
-import { decryptMessage } from "@/lib/e2ee/messages";
+import { decryptMessage } from "@/features/e2ee/lib/messages";
 
 const MAX_BODY_LENGTH = 120;
 

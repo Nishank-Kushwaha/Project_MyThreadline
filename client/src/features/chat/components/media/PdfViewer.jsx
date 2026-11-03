@@ -22,7 +22,7 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
-import { formatFileSize } from "@/lib/e2ee/media";
+import { formatFileSize } from "@/features/e2ee/lib/media";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Phone, PhoneOff, Video, Loader2 } from "lucide-react";
-import { useCall } from "@/context/CallContext";
+import { useCall } from "@/features/videoCall/context/CallContext";
 import { cn } from "@/lib/utils";
 
 export function IncomingCallDialog() {

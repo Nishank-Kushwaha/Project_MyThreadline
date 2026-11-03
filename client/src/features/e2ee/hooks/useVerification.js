@@ -3,11 +3,11 @@ import {
   clearRoomEncryptionCache,
   clearUserKeysCache,
   getRoomEncryption,
-} from "@/lib/e2ee/directory";
+} from "@/features/e2ee/lib/directory";
 import {
   getVerificationStatus,
   subscribeVerification,
-} from "@/lib/e2ee/verification";
+} from "@/features/e2ee/lib/verification";
 
 // Everyone in a chat with their current device keys and verification state.
 // -> { roster, myDevices, statuses: { [userId]: { name, devices, state, ... } } }

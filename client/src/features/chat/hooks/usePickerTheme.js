@@ -1,4 +1,4 @@
-import { useTheme } from "@/context/ThemeContext";
+import { useTheme } from "@/app/providers/ThemeContext";
 import { THEMES, getSystemTheme } from "@/lib/themes";
 
 // Same rule as applyTheme(): themes with a palette use their `dark` flag,

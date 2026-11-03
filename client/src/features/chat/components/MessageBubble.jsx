@@ -18,8 +18,8 @@ import { QuickReactBar } from "./QuickReactBar";
 import { ReactionPills } from "./ReactionPills";
 import { Avatar } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { MediaAttachment } from "./MediaAttachment";
-import { PollBubble } from "./PollBubble";
+import { MediaAttachment } from "./media/MediaAttachment";
+import { PollBubble } from "./polls/PollBubble";
 import {
   FormattedMessageText,
   LinkPreviewCard,
@@ -29,7 +29,7 @@ import {
 // Code-split: emoji-picker-react's emoji dataset only downloads when
 // someone actually opens the picker.
 const EmojiPickerPopover = lazy(() =>
-  import("./EmojiPickerPopover").then((m) => ({
+  import("./media/EmojiPickerPopover").then((m) => ({
     default: m.EmojiPickerPopover,
   })),
 );

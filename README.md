@@ -85,82 +85,55 @@ Project/
 │   │   ├── sw.js                            # Main Service Worker for caching & push
 │   │   └── sw-e2ee.js                       # Service Worker cryptographic push decryptor
 │   ├── src/
-│   │   ├── api/                             # Axios REST API clients
-│   │   │   ├── authApi.js                   # Authentication & profile endpoints
-│   │   │   ├── callsApi.js                  # Dynamic ICE / TURN server credentials endpoint
-│   │   │   ├── keysApi.js                   # Public device key directory endpoints
-│   │   │   ├── mediaApi.js                  # Encrypted/unencrypted media upload endpoints
-│   │   │   ├── pushApi.js                   # Web Push subscription registration
-│   │   │   ├── roomsApi.js                  # Chat rooms, group management & member endpoints
-│   │   │   └── usersApi.js                  # User directory & search endpoints
-│   │   ├── components/                      # UI Component Library (Radix / CVA / Tailwind)
-│   │   │   └── ui/                          # Avatar, Button, Dialog, Input, Toasts, etc.
-│   │   ├── context/                         # React context providers
-│   │   │   ├── AuthContext.jsx              # Global authenticated user state
-│   │   │   ├── CallContext.jsx              # WebRTC call state machine & signaling coordinator
-│   │   │   ├── E2EEContext.jsx              # Device key initialization & room encryption state
-│   │   │   ├── SocketContext.jsx            # Socket.io connection lifecycle manager
-│   │   │   └── ThemeContext.jsx             # Color theme manager
-│   │   ├── features/                        # Core application feature modules
-│   │   │   ├── chat/                        # Chat UI & Interaction components
-│   │   │   │   ├── ChatWindow.jsx           # Active conversation viewport & event controller
-│   │   │   │   ├── CreatePollDialog.jsx     # WhatsApp-style poll creation modal
-│   │   │   │   ├── EmojiPickerPopover.jsx   # Lazy-loaded emoji selection popover
-│   │   │   │   ├── GifPickerPopover.jsx     # GIPHY/Tenor search popover
-│   │   │   │   ├── LinkPreview.jsx          # OpenGraph rich link preview card
-│   │   │   │   ├── MediaAttachment.jsx      # Image, video, audio & file attachments
-│   │   │   │   ├── MembersPanel.jsx         # Group member list & admin role controls
-│   │   │   │   ├── MessageBubble.jsx        # Individual chat bubble with menu & swipe-reply
-│   │   │   │   ├── MessageInput.jsx         # Input bar with attachments, voice, poll buttons
-│   │   │   │   ├── MessageSearchBar.jsx     # Local IndexedDB message search bar
-│   │   │   │   ├── PdfViewer.jsx            # Integrated PDF viewer modal
-│   │   │   │   ├── PollBubble.jsx           # Interactive in-chat poll option bars & votes
-│   │   │   │   ├── PollVotesDialog.jsx      # WhatsApp-style "View Votes" modal breakdown
-│   │   │   │   ├── QuickReactBar.jsx        # Quick reaction floating emoji bar
-│   │   │   │   ├── ReactionPills.jsx        # Aggregated reaction pill counts on bubbles
-│   │   │   │   ├── RoomList.jsx             # Left sidebar conversation list
-│   │   │   │   ├── TypingIndicator.jsx      # Real-time typing bubble
-│   │   │   │   ├── VoiceRecorder.jsx        # Voice note recording interface
-│   │   │   │   └── hooks/                   # Chat hooks
-│   │   │   │       ├── useBrowserNotifications.js # Browser notification permission & switch sync
-│   │   │   │       ├── useChatNotifications.js    # Unread message & room invite notification coordinator
-│   │   │   │       ├── usePickerTheme.js          # Resolves active dark/light palette for emoji & GIF pickers
-│   │   │   │       ├── usePushSubscription.js     # Web Push subscription lifecycle manager
-│   │   │   │       └── useVoiceRecorder.js        # Web Audio API voice note recording & volume levels
-│   │   │   ├── e2ee/                        # E2EE security UI & components
-│   │   │   │   ├── BackupSettings.jsx       # Passphrase backup / restore UI
-│   │   │   │   ├── EncryptionStatus.jsx     # Chat header lock indicator & key info
-│   │   │   │   ├── SafetyNumberDialog.jsx   # QR code & safety number comparison modal
-│   │   │   │   └── hooks/                   # E2EE hooks
-│   │   │   │       └── useVerification.js   # Room device verification status & roster state
-│   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing module
-│   │   │       ├── CallControls.jsx         # Floating call action bar (mic, camera, share, settings, hangup)
-│   │   │       ├── CallModal.jsx            # Fullscreen viewport, status badges & PiP container
-│   │   │       ├── DevicePicker.jsx         # Live settings popup (microphone, camera, speaker, flip)
-│   │   │       ├── IncomingCallDialog.jsx   # Radar glow incoming call modal with auto-decline
-│   │   │       ├── RemoteAudio.jsx          # Dedicated audio sink with dynamic speaker routing (`setSinkId`)
-│   │   │       ├── VideoGrid.jsx            # Auto-layout viewport (Aspect math, Fit/Fill & un-mirrored rear cam)
-│   │   │       └── hooks/                   # Calling hooks
-│   │   │           ├── useCallSound.js      # Ringtone, ringback & end call tone synthesis
-│   │   │           ├── useMediaDevices.js   # Hardware enumeration, hot-plug watch & track acquisition
-│   │   │           ├── useSpeakingDetector.js # Web Audio API loudness metering & active speaker detection
-│   │   │           └── useWebRTC.js         # Peer connection, Opus tuning, adaptive bitrate & track replacement
-│   │   ├── lib/                             # Utility helpers & cryptographic engine
-│   │   │   ├── e2ee/                        # Web Crypto E2EE Engine
-│   │   │   │   ├── backup.js                # PBKDF2/AES-GCM key backup export & import
-│   │   │   │   ├── crypto.js                # ECDH, HKDF, AES-GCM, and reaction/poll crypto
-│   │   │   │   ├── deviceKey.js             # Device keypair generation & IndexedDB storage
-│   │   │   │   ├── directory.js             # Room participant public key cache
-│   │   │   │   ├── encoding.js              # Base64URL and binary ArrayBuffer utilities
-│   │   │   │   ├── identity.js              # Active device identity resolution
-│   │   │   │   ├── keyStore.js              # IndexedDB wrapper for local private keys
-│   │   │   │   ├── media.js                 # Client-side file encryption/decryption
-│   │   │   │   ├── messages.js              # Envelope building, decryption & payload mapping
-│   │   │   │   ├── messageStore.js          # IndexedDB local search index for decrypted text
-│   │   │   │   └── safety.js                # SHA-256 Safety number computation
-│   │   │   └── utils.js                     # Formatting, avatars, and class merging
-│   │   └── pages/                           # Route pages (Dashboard, Login, Register, Profile)
-│   ├── index.html                           # Application entry HTML
+│   │   ├── app/                             # Core Application Shell & Routing
+│   │   │   ├── App.jsx                      # App root component
+│   │   │   ├── AppRoutes.jsx                # Declarative client-side route table
+│   │   │   ├── AppProviders.jsx             # Top-level context provider pipeline
+│   │   │   ├── ProtectedRoute.jsx           # Auth guard wrapper for authenticated routes
+│   │   │   └── providers/                   # Infrastructure context providers
+│   │   │       ├── SocketContext.jsx        # Socket.io connection lifecycle manager
+│   │   │       └── ThemeContext.jsx         # Color theme manager
+│   │   ├── assets/                          # Static branding and vector images
+│   │   ├── components/                      # Shared UI Component Library
+│   │   │   ├── common/                      # Compound components (AvatarPicker, ThemePicker, Bubbles)
+│   │   │   └── ui/                          # Radix / Tailwind primitives (Avatar, Button, Dialog, etc.)
+│   │   ├── features/                        # Domain Features (Vertical Slices)
+│   │   │   ├── auth/                        # User authentication & account management
+│   │   │   │   ├── api/authApi.js           # Login, register, session refresh REST endpoints
+│   │   │   │   ├── context/AuthContext.jsx  # Global authenticated user state & auth token lifecycle
+│   │   │   │   └── pages/                   # Login, Register, Profile, and OAuthCallback views
+│   │   │   ├── chat/                        # Messaging, rooms, media & polling feature
+│   │   │   │   ├── api/                     # Rooms, users, and media upload endpoints
+│   │   │   │   ├── components/              # Chat window, messages, input bar, room list, members
+│   │   │   │   │   ├── media/               # Media attachments, audio recording, PDF/GIF pickers
+│   │   │   │   │   └── polls/               # Poll creation, voting bubble & vote inspection modal
+│   │   │   │   ├── hooks/                   # useVoiceRecorder and usePickerTheme hooks
+│   │   │   │   └── pages/Dashboard.jsx      # Main authenticated dashboard page
+│   │   │   ├── e2ee/                        # End-to-End Encryption engine & verification UI
+│   │   │   │   ├── api/keysApi.js           # Public device key directory endpoints
+│   │   │   │   ├── context/E2EEContext.jsx  # Device key initialization & room encryption state
+│   │   │   │   ├── components/              # Key backup, status, safety numbers, encryption notices
+│   │   │   │   ├── hooks/useVerification.js # Verification status and roster monitoring
+│   │   │   │   └── lib/                     # Web Crypto engine (ECDH, HKDF, AES-GCM, stores)
+│   │   │   ├── notifications/               # Push & In-App Notification feature
+│   │   │   │   ├── api/pushApi.js           # Web Push subscription endpoints
+│   │   │   │   ├── components/              # Notification banner & background notification manager
+│   │   │   │   ├── hooks/                   # Browser notification switches & push subscription hooks
+│   │   │   │   └── lib/                     # Notification helpers & VAPID push worker clients
+│   │   │   └── videoCall/                   # 1-on-1 Voice, Video & Screen Sharing feature
+│   │   │       ├── api/callsApi.js          # Dynamic Metered.ca TURN & Google STUN endpoints
+│   │   │       ├── context/CallContext.jsx  # WebRTC state machine & signaling coordinator
+│   │   │       ├── components/              # Video grid, call controls, device picker, modals
+│   │   │       └── hooks/                   # useWebRTC, useMediaDevices, useSpeakingDetector, useCallSound
+│   │   ├── lib/                             # Shared framework-agnostic utilities
+│   │   │   ├── axios.js                     # Configured Axios HTTP client instance
+│   │   │   ├── socket.js                    # Singleton Socket.io factory & token renewal
+│   │   │   ├── themes.js                    # Color palettes & theme resolver
+│   │   │   └── utils.js                     # General helper functions (cn, formatters, etc.)
+│   │   ├── styles/                          # Global CSS stylesheets
+│   │   │   └── index.css                    # Tailwind CSS v4 directives & theme styling
+│   │   └── main.jsx                         # Application entrypoint
+│   ├── jsconfig.json                        # VS Code path aliases configuration
 │   ├── package.json                         # Client dependencies & scripts
 │   └── vite.config.js                       # Vite configuration
 │

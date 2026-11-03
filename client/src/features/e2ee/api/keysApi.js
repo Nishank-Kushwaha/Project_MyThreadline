@@ -1,4 +1,4 @@
-import api from "./axios";
+import api from "@/lib/axios";
 
 export const publishDeviceKeyRequest = (data) => api.put("/keys/device", data);
 

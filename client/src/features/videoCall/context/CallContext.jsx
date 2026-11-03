@@ -7,11 +7,11 @@ import React, {
   useEffect,
 } from "react";
 import { toast } from "sonner";
-import { useSocket } from "./SocketContext";
+import { useSocket } from "@/app/providers/SocketContext";
 import { useMediaDevices } from "@/features/videoCall/hooks/useMediaDevices";
 import { useWebRTC } from "@/features/videoCall/hooks/useWebRTC";
 import { useCallSound } from "@/features/videoCall/hooks/useCallSound";
-import { RemoteAudio } from "@/features/videoCall/RemoteAudio";
+import { RemoteAudio } from "@/features/videoCall/components/RemoteAudio";
 import { useSpeakingDetector } from "@/features/videoCall/hooks/useSpeakingDetector";
 
 const CallContext = createContext(null);
