@@ -12,8 +12,8 @@ import { CallModal } from "@/features/videoCall/components/CallModal";
 
 export function AppProviders({ children }) {
   return (
-    <ThemeProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <ThemeProvider>
         <Toaster position="top-center" richColors closeButton={false} />
         <SocketProvider>
           <E2EEProvider>
@@ -25,7 +25,7 @@ export function AppProviders({ children }) {
             </CallProvider>
           </E2EEProvider>
         </SocketProvider>
-      </AuthProvider>
-    </ThemeProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
