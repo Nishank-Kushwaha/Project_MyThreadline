@@ -3,10 +3,10 @@ import { createPortal } from "react-dom";
 import { GifPicker } from "gif-picker-react";
 import { Giphy } from "gif-picker-react/providers/giphy";
 import "gif-picker-react/style.css";
+
 import { usePickerTheme } from "@/features/chat/hooks/usePickerTheme";
 
-// Same overlay pattern as EmojiPickerPopover (backdrop + centered card).
-// Lazy-loaded from GifPickerButton, so it only downloads when first opened.
+// Centered GIF picker over a backdrop; lazy-loaded from GifPickerButton
 export function GifPickerPopover({ onOpenChange, onPick }) {
   const apiKey = import.meta.env.VITE_GIPHY_API_KEY;
   const pickerTheme = usePickerTheme();
@@ -16,13 +16,21 @@ export function GifPickerPopover({ onOpenChange, onPick }) {
     [apiKey],
   );
 
+  // Escape closes the picker
   useEffect(() => {
-    const onKey = (e) => {
+    const handleKeyDown = (e) => {
       if (e.key === "Escape") onOpenChange(false);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onOpenChange]);
+
+  const close = () => onOpenChange(false);
+
+  const handleGifClick = (gif) => {
+    onPick(gif);
+    close();
+  };
 
   return createPortal(
     <div
@@ -31,10 +39,7 @@ export function GifPickerPopover({ onOpenChange, onPick }) {
       aria-label="GIF picker"
       className="fixed inset-0 z-70 flex items-center justify-center p-4"
     >
-      <div
-        className="absolute inset-0 bg-black/60"
-        onClick={() => onOpenChange(false)}
-      />
+      <div className="absolute inset-0 bg-black/60" onClick={close} />
       <div className="gif-popover relative z-10">
         {provider ? (
           <GifPicker
@@ -43,10 +48,7 @@ export function GifPickerPopover({ onOpenChange, onPick }) {
             autoFocusSearch
             width="min(350px, calc(100vw - 2rem))"
             height={450}
-            onGifClick={(gif) => {
-              onPick(gif);
-              onOpenChange(false);
-            }}
+            onGifClick={handleGifClick}
           />
         ) : (
           <div className="rounded-lg border border-border bg-background p-4 text-xs text-destructive">

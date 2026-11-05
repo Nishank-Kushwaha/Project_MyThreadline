@@ -1,12 +1,15 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
 
+// Lazy so the picker only downloads when first opened
 const GifPickerPopover = lazy(() =>
   import("./GifPickerPopover").then((m) => ({ default: m.GifPickerPopover })),
 );
 
+// "GIF" button in the message bar that opens the picker
 export function GifPickerButton({ onSelect, disabled = false }) {
   const [open, setOpen] = useState(false);
 
+  // Close the picker if the input gets disabled
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);

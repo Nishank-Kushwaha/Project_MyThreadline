@@ -1,29 +1,32 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
-// Sum of frame delays (ms), read from the GIF's Graphic Control Extension blocks.
+// Total GIF length in ms, summed from the frame delays in its Graphic Control Extension blocks
 async function readGifDuration(src, signal) {
   const res = await fetch(src, { signal, credentials: "omit" });
   const buf = new Uint8Array(await res.arrayBuffer());
   let total = 0;
+
   for (let i = 0; i < buf.length - 7; i++) {
-    // 0x21 0xF9 0x04 <flags> <delay lo> <delay hi> <transparent idx> 0x00
-    if (
+    // Block layout: 0x21 0xF9 0x04 <flags> <delay lo> <delay hi> <transparent idx> 0x00
+    const isFrameBlock =
       buf[i] === 0x21 &&
       buf[i + 1] === 0xf9 &&
       buf[i + 2] === 0x04 &&
-      buf[i + 7] === 0x00
-    ) {
-      let delay = buf[i + 4] | (buf[i + 5] << 8); // 1/100 s
-      if (delay < 2) delay = 10; // browsers treat tiny delays as 100ms
-      total += delay * 10;
-      i += 7;
-    }
+      buf[i + 7] === 0x00;
+    if (!isFrameBlock) continue;
+
+    let delay = buf[i + 4] | (buf[i + 5] << 8); // in 1/100 s
+    if (delay < 2) delay = 10; // browsers treat tiny delays as 100ms
+    total += delay * 10;
+    i += 7;
   }
   return total;
 }
 
+// Still first frame with a GIF badge; tap to play a few loops, then it stops again
 export function GifImagePlayer({
   src,
   isLoading,
@@ -40,20 +43,22 @@ export function GifImagePlayer({
   onErrorRef.current = onError;
 
   const [playing, setPlaying] = useState(false);
-  const [playId, setPlayId] = useState(0); // remount <img> => restarts from frame 1
+  const [playId, setPlayId] = useState(0); // remounts the <img> so it restarts from frame 1
   const [aspect, setAspect] = useState(null);
 
-  // Paint first frame to canvas + read total duration
+  // Paint the first frame to the canvas and read the total duration
   useEffect(() => {
     if (!src || isLoading || error) return;
+
     const controller = new AbortController();
     const img = new Image();
+
     img.onload = () => {
-      const c = canvasRef.current;
-      if (!c) return;
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      c.getContext("2d").drawImage(img, 0, 0);
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext("2d").drawImage(img, 0, 0);
       setAspect(img.naturalWidth / img.naturalHeight);
     };
     img.onerror = () => onErrorRef.current?.();
@@ -77,10 +82,17 @@ export function GifImagePlayer({
 
   const toggle = () => {
     if (playing) return stop();
+
     setPlayId((n) => n + 1);
     setPlaying(true);
-    const once = durationRef.current || 3000;
-    timerRef.current = setTimeout(stop, once * loopCount);
+    const oneLoop = durationRef.current || 3000;
+    timerRef.current = setTimeout(stop, oneLoop * loopCount);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    toggle();
   };
 
   if (isLoading) {
@@ -90,6 +102,7 @@ export function GifImagePlayer({
       </div>
     );
   }
+
   if (error) {
     return (
       <div className="flex h-24 w-48 items-center justify-center gap-2 rounded-lg bg-destructive/10 p-3 text-xs text-destructive">
@@ -105,12 +118,7 @@ export function GifImagePlayer({
       tabIndex={0}
       aria-label={playing ? "Stop GIF" : "Play GIF"}
       onClick={toggle}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggle();
-        }
-      }}
+      onKeyDown={handleKeyDown}
       style={aspect ? { aspectRatio: String(aspect) } : undefined}
       className={cn(
         "relative max-h-72 min-h-24 w-auto max-w-[16rem] cursor-pointer select-none overflow-hidden rounded-lg bg-black",
@@ -118,10 +126,10 @@ export function GifImagePlayer({
         className,
       )}
     >
-      {/* Still first frame (always underneath) */}
+      {/* Still first frame, always underneath */}
       <canvas ref={canvasRef} className="h-full w-full object-cover" />
 
-      {/* Animated GIF only while playing */}
+      {/* Animated GIF, only while playing */}
       {playing && (
         <img
           key={playId}
