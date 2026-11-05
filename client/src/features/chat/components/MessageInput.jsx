@@ -19,7 +19,7 @@ import {
 import { formatFileSize } from "@/features/e2ee/lib/media";
 
 import { GifPickerButton } from "./media/GifPickerButton";
-import { gifToFile } from "@/lib/utils";
+import { gifToFile, isGifFile } from "@/lib/utils";
 import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
 import { VoiceRecorder } from "./media/VoiceRecorder";
 import { CreatePollDialog } from "./polls/CreatePollDialog";
@@ -202,22 +202,49 @@ export function MessageInput({
     if (filePreview) URL.revokeObjectURL(filePreview);
     setSelectedFile(file);
     setFilePreview(
-      file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      file.type.startsWith("image/") || file.type.startsWith("video/")
+        ? URL.createObjectURL(file)
+        : null,
     );
     return true;
   };
 
   // Accept file dropped into the ChatWindow from above
   useEffect(() => {
-    if (droppedFile) {
-      acceptFile(droppedFile);
+    if (!droppedFile) return;
+
+    let cancelled = false;
+    const processDropped = async () => {
+      if (isGifFile(droppedFile)) {
+        setGifLoading(true);
+        const toastId = toast.loading("Converting GIF to video...");
+        try {
+          const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+          const mp4File = await convertGifToMp4(droppedFile);
+          toast.dismiss(toastId);
+          if (!cancelled) acceptFile(mp4File);
+        } catch (err) {
+          toast.dismiss(toastId);
+          console.error("GIF conversion error:", err);
+          if (!cancelled) acceptFile(droppedFile);
+        } finally {
+          if (!cancelled) setGifLoading(false);
+        }
+      } else {
+        acceptFile(droppedFile);
+      }
       onClearDroppedFile?.();
       textareaRef.current?.focus();
-    }
+    };
+
+    processDropped();
+    return () => {
+      cancelled = true;
+    };
   }, [droppedFile]);
 
   // Handle clipboard paste (Ctrl+V / Cmd+V for screenshots and files)
-  const handlePaste = (e) => {
+  const handlePaste = async (e) => {
     const items = e.clipboardData?.items;
     if (!items || items.length === 0) return;
 
@@ -226,25 +253,57 @@ export function MessageInput({
       if (item.kind === "file") {
         const file = item.getAsFile();
         if (file) {
-          // If it is a file/image, intercept paste and attach
           e.preventDefault();
-          const accepted = acceptFile(file);
-          if (accepted) {
-            textareaRef.current?.focus();
+          if (isGifFile(file)) {
+            setGifLoading(true);
+            const toastId = toast.loading("Converting GIF to video...");
+            try {
+              const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+              const mp4File = await convertGifToMp4(file);
+              toast.dismiss(toastId);
+              acceptFile(mp4File);
+            } catch (err) {
+              toast.dismiss(toastId);
+              console.error("GIF conversion error:", err);
+              acceptFile(file);
+            } finally {
+              setGifLoading(false);
+            }
+          } else {
+            acceptFile(file);
           }
+          textareaRef.current?.focus();
           return;
         }
       }
     }
-    // If no file was found in clipboard, normal text paste proceeds naturally
   };
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    acceptFile(file);
-    // Clearing the input lets the user pick the same file again.
     if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (isGifFile(file)) {
+      setGifLoading(true);
+      const toastId = toast.loading("Converting GIF to video...");
+      try {
+        const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+        const mp4File = await convertGifToMp4(file);
+        toast.dismiss(toastId);
+        acceptFile(mp4File);
+      } catch (err) {
+        toast.dismiss(toastId);
+        console.error("GIF conversion error:", err);
+        toast.error("Failed to convert GIF. Sending original file.");
+        acceptFile(file);
+      } finally {
+        setGifLoading(false);
+      }
+      return;
+    }
+
+    acceptFile(file);
   };
 
   const handleRemoveFile = () => {
@@ -414,11 +473,27 @@ export function MessageInput({
           <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
             <div className="flex items-center gap-3 overflow-hidden">
               {filePreview ? (
-                <img
-                  src={filePreview}
-                  alt="Upload preview"
-                  className="h-12 w-12 shrink-0 rounded-lg object-cover"
-                />
+                selectedFile?.type.startsWith("video/") || selectedFile?.isGif ? (
+                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-black">
+                    <video
+                      src={filePreview}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="h-full w-full object-cover"
+                    />
+                    <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
+                      GIF
+                    </span>
+                  </div>
+                ) : (
+                  <img
+                    src={filePreview}
+                    alt="Upload preview"
+                    className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                  />
+                )
               ) : (
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <File className="h-6 w-6" />

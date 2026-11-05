@@ -70,13 +70,67 @@ export function formatDateSeparator(dateInput) {
   return `${day}/${month}/${year}`;
 }
 
-// Downloads a picked GIF and wraps it as a File, so it goes through the same
-// attachment flow (validation, preview, encryption, upload) as any other file.
-export async function gifToFile(gif) {
-  const url = gif?.imageUrl;
-  if (!url) throw new Error("GIF has no imageUrl");
+/**
+ * Checks whether a file or object represents a GIF (by MIME type, extension, or flag)
+ */
+export function isGifFile(file) {
+  if (!file) return false;
+  if (file.isGif === true || file.gifPlayback === true) return true;
 
-  const res = await fetch(url, {
+  const type = String(
+    file.type || file.mimeType || file.fileType || "",
+  ).toLowerCase();
+  if (type === "image/gif" || type === "video/gif") return true;
+
+  const name = String(file.name || file.fileName || "").toLowerCase();
+  return name.endsWith(".gif") || name.endsWith(".gifv");
+}
+
+// Downloads a picked GIF and wraps it as a silent H.264 MP4 File (WhatsApp-style).
+// 1. Checks if the picker provider (GIPHY/Tenor) provides a native MP4 stream.
+//    If so, fetches the direct MP4 (instant, zero CPU overhead, pristine quality).
+// 2. Otherwise downloads the GIF image blob and converts it to MP4 via convertGifToMp4.
+// Both paths return a standard `video/mp4` File with `isGif = true`.
+export async function gifToFile(gif) {
+  const base =
+    String(gif?.description || "gif")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "gif";
+
+  // Check for direct native MP4 URL provided by GIPHY or Tenor
+  const mp4Url =
+    gif?.raw?.images?.downsized_small?.mp4 ||
+    gif?.raw?.images?.fixed_height?.mp4 ||
+    gif?.raw?.images?.original?.mp4 ||
+    gif?.raw?.media_formats?.mp4?.url ||
+    gif?.raw?.media_formats?.tiny_mp4?.url;
+
+  if (mp4Url) {
+    try {
+      const res = await fetch(mp4Url, {
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const file = new File([blob], `${base}.mp4`, { type: "video/mp4" });
+        file.isGif = true;
+        file.gifPlayback = true;
+        return file;
+      }
+    } catch (e) {
+      console.warn("Direct MP4 fetch failed, falling back to converter:", e);
+    }
+  }
+
+  // Fallback: download the GIF image and convert it to MP4
+  const imageUrl = gif?.imageUrl;
+  if (!imageUrl) throw new Error("GIF has no valid image or video source");
+
+  const res = await fetch(imageUrl, {
     credentials: "omit",
     referrerPolicy: "no-referrer",
     signal: AbortSignal.timeout(15000),
@@ -84,15 +138,9 @@ export async function gifToFile(gif) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
 
-  const base =
-    String(gif.description || "gif")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "gif";
-
-  // Forced type: this routes it to GifImagePlayer on the receiving side.
-  return new File([blob], `${base}.gif`, { type: "image/gif" });
+  const tempGifFile = new File([blob], `${base}.gif`, { type: "image/gif" });
+  const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+  return await convertGifToMp4(tempGifFile);
 }
 
 /**

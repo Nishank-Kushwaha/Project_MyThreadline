@@ -668,6 +668,7 @@ export function ChatWindow({
           fileName: encrypted.fileName,
           fileType: encrypted.fileType,
           fileSize: encrypted.fileSize,
+          isGif: Boolean(file.isGif || file.name?.toLowerCase().includes("gif")),
         };
       }
 
