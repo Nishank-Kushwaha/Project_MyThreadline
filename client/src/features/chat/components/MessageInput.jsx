@@ -209,35 +209,69 @@ export function MessageInput({
     return true;
   };
 
+  // Central handler for adding any file (picker, drop, paste).
+  // Validates file constraints, normalizes GIFs into silent MP4s, and manages user toasts.
+  const processAndAcceptFile = async (rawFile) => {
+    if (!rawFile) return false;
+
+    // 1. Fast pre-validation BEFORE expensive operations
+    setFileError("");
+    if (rawFile.size === 0) {
+      const err = "This file is empty.";
+      setFileError(err);
+      toast.error(err);
+      return false;
+    }
+    if (rawFile.size > MAX_FILE_SIZE_BYTES) {
+      const err = "File exceeds the 15 MiB limit.";
+      setFileError(err);
+      toast.error(err);
+      return false;
+    }
+    if (!isAllowedFile(rawFile)) {
+      const err = "This file type isn't supported.";
+      setFileError(err);
+      toast.error(err);
+      return false;
+    }
+
+    // 2. GIF Pipeline: transcode any GIF into a silent H.264 MP4
+    let fileToAccept = rawFile;
+    if (isGifFile(rawFile)) {
+      setGifLoading(true);
+      const toastId = toast.loading("Converting GIF to video...");
+      try {
+        const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+        fileToAccept = await convertGifToMp4(rawFile);
+        toast.dismiss(toastId);
+      } catch (err) {
+        console.error("GIF conversion failed:", err);
+        const errMsg = "Couldn't convert that GIF to video. Please try another file.";
+        setFileError(errMsg);
+        toast.error(errMsg, { id: toastId });
+        return false;
+      } finally {
+        setGifLoading(false);
+      }
+    }
+
+    return acceptFile(fileToAccept);
+  };
+
   // Accept file dropped into the ChatWindow from above
   useEffect(() => {
     if (!droppedFile) return;
 
     let cancelled = false;
-    const processDropped = async () => {
-      if (isGifFile(droppedFile)) {
-        setGifLoading(true);
-        const toastId = toast.loading("Converting GIF to video...");
-        try {
-          const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
-          const mp4File = await convertGifToMp4(droppedFile);
-          toast.dismiss(toastId);
-          if (!cancelled) acceptFile(mp4File);
-        } catch (err) {
-          toast.dismiss(toastId);
-          console.error("GIF conversion error:", err);
-          if (!cancelled) acceptFile(droppedFile);
-        } finally {
-          if (!cancelled) setGifLoading(false);
-        }
-      } else {
-        acceptFile(droppedFile);
+    const handleDrop = async () => {
+      const accepted = await processAndAcceptFile(droppedFile);
+      if (!cancelled) {
+        onClearDroppedFile?.();
+        if (accepted) textareaRef.current?.focus();
       }
-      onClearDroppedFile?.();
-      textareaRef.current?.focus();
     };
 
-    processDropped();
+    handleDrop();
     return () => {
       cancelled = true;
     };
@@ -248,31 +282,13 @@ export function MessageInput({
     const items = e.clipboardData?.items;
     if (!items || items.length === 0) return;
 
-    // Look for image or file in clipboard
     for (const item of items) {
       if (item.kind === "file") {
         const file = item.getAsFile();
         if (file) {
           e.preventDefault();
-          if (isGifFile(file)) {
-            setGifLoading(true);
-            const toastId = toast.loading("Converting GIF to video...");
-            try {
-              const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
-              const mp4File = await convertGifToMp4(file);
-              toast.dismiss(toastId);
-              acceptFile(mp4File);
-            } catch (err) {
-              toast.dismiss(toastId);
-              console.error("GIF conversion error:", err);
-              acceptFile(file);
-            } finally {
-              setGifLoading(false);
-            }
-          } else {
-            acceptFile(file);
-          }
-          textareaRef.current?.focus();
+          const accepted = await processAndAcceptFile(file);
+          if (accepted) textareaRef.current?.focus();
           return;
         }
       }
@@ -283,27 +299,8 @@ export function MessageInput({
     const file = e.target.files?.[0];
     if (!file) return;
     if (fileInputRef.current) fileInputRef.current.value = "";
-
-    if (isGifFile(file)) {
-      setGifLoading(true);
-      const toastId = toast.loading("Converting GIF to video...");
-      try {
-        const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
-        const mp4File = await convertGifToMp4(file);
-        toast.dismiss(toastId);
-        acceptFile(mp4File);
-      } catch (err) {
-        toast.dismiss(toastId);
-        console.error("GIF conversion error:", err);
-        toast.error("Failed to convert GIF. Sending original file.");
-        acceptFile(file);
-      } finally {
-        setGifLoading(false);
-      }
-      return;
-    }
-
-    acceptFile(file);
+    const accepted = await processAndAcceptFile(file);
+    if (accepted) textareaRef.current?.focus();
   };
 
   const handleRemoveFile = () => {

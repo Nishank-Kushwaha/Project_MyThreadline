@@ -5,20 +5,6 @@ let ffmpegInstance = null;
 let loadPromise = null;
 
 /**
- * Checks whether a file or object represents a GIF (by MIME type, extension, or flag)
- */
-export function isGifFile(file) {
-  if (!file) return false;
-  if (file.isGif === true || file.gifPlayback === true) return true;
-
-  const type = String(file.type || file.mimeType || file.fileType || "").toLowerCase();
-  if (type === "image/gif" || type === "video/gif") return true;
-
-  const name = String(file.name || file.fileName || "").toLowerCase();
-  return name.endsWith(".gif") || name.endsWith(".gifv");
-}
-
-/**
  * Lazily loads and returns the singleton single-threaded FFmpeg instance.
  */
 async function getFFmpeg() {
