@@ -1,895 +1,66 @@
 import React, {
+  lazy,
+  Suspense,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  lazy,
-  Suspense,
 } from "react";
 import {
-  X,
-  UserPlus,
-  Crown,
-  Pencil,
-  Check,
+  ArrowRightLeft,
   Camera,
-  Trash2,
-  Sparkles,
-  Search,
+  Check,
+  Crown,
   Loader2,
   LogOut,
-  ShieldOff,
-  ArrowRightLeft,
+  Pencil,
+  Search,
   Shield,
   ShieldAlert,
   ShieldCheck,
+  ShieldOff,
+  Sparkles,
+  Trash2,
+  UserPlus,
+  X,
 } from "lucide-react";
-
+import { toast } from "sonner";
+import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-
 import {
-  getRoomMembersRequest,
   addRoomMemberRequest,
-  removeRoomMemberRequest,
-  makeRoomAdminRequest,
   demoteRoomAdminRequest,
-  transferCreatorRequest,
-  updateGroupNameRequest,
-  updateGroupAvatarRequest,
-  removeGroupAvatarRequest,
+  getRoomMembersRequest,
   leaveRoomRequest,
+  makeRoomAdminRequest,
+  removeGroupAvatarRequest,
+  removeRoomMemberRequest,
+  transferCreatorRequest,
+  updateGroupAvatarRequest,
+  updateGroupNameRequest,
 } from "@/features/chat/api/roomsApi";
-
 import { listUsersRequest } from "@/features/chat/api/usersApi";
-
 import { useRoomVerification } from "@/features/e2ee/hooks/useVerification";
 import { SafetyNumberDialog } from "@/features/e2ee/components/SafetyNumberDialog";
-import { toast } from "sonner";
 
-// Lazy-loaded so the DiceBear collection stays out of the main bundle.
+// Lazy-loaded so the DiceBear avatar collection stays out of the initial bundle
 const AvatarPicker = lazy(() => import("@/components/common/AvatarPicker"));
 
 const MAX_GROUP_NAME = 50;
 
+// Extracts API error message with fallback text
 const apiMessage = (err, fallback) => err?.response?.data?.message || fallback;
 
-/* ------------------------------------------------------------------ */
-/* Group info panel                                                    */
-/* ------------------------------------------------------------------ */
-
-export function MembersPanel({
-  open,
-  onOpenChange,
-  room,
-  currentUserId,
-  socket,
-}) {
-  const [members, setMembers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [memberSearch, setMemberSearch] = useState("");
-
-  // Group name / photo as shown in this panel (kept in sync with the room prop).
-  const [info, setInfo] = useState({
-    name: room.name,
-    avatarUrl: room.avatarUrl,
-  });
-
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [nameStatus, setNameStatus] = useState({ loading: false, error: "" });
-
-  const [photoStatus, setPhotoStatus] = useState({
-    loading: false,
-    action: null,
-    error: "",
-  });
-  const [avatarPreview, setAvatarPreview] = useState(null);
-
-  const [isAddOpen, setIsAddOpen] = useState(false);
-  const [showPhoto, setShowPhoto] = useState(false);
-  const [showPicker, setShowPicker] = useState(false);
-  const [confirm, setConfirm] = useState(null);
-  const [verifyUserId, setVerifyUserId] = useState(null);
-
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    setInfo({ name: room.name, avatarUrl: room.avatarUrl });
-  }, [room.id, room.name, room.avatarUrl]);
-
-  // Admin status comes from the freshly loaded member list when available.
-  const isAdmin =
-    members.find((m) => m.id === currentUserId)?.isAdmin ?? room.isAdmin;
-
-  // Creator status comes from the freshly loaded member list when available.
-  const isCreator =
-    members.find((m) => m.id === currentUserId)?.isCreator ?? false;
-
-  const memberCount = isLoading ? room.memberCount : members.length;
-
-  const verification = useRoomVerification({ room, currentUserId, socket });
-
-  /* ----------------------------- loading ----------------------------- */
-
-  const loadMembers = async () => {
-    setIsLoading(true);
-    setError("");
-
-    try {
-      const { data } = await getRoomMembersRequest(room.id);
-      setMembers(data.members);
-    } catch (err) {
-      setError(apiMessage(err, "Couldn't load members."));
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (open) {
-      setMembers([]);
-      setMemberSearch("");
-      setIsEditingName(false);
-      loadMembers();
-    }
-    // loadMembers is intentionally omitted from dependencies.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, room.id]);
-
-  useEffect(() => {
-    if (!socket || !open) return;
-
-    const refresh = ({ roomId }) => {
-      if (roomId === room.id) loadMembers();
-    };
-
-    socket.on("room:member-added", refresh);
-    socket.on("room:member-removed", refresh);
-    socket.on("room:member-promoted", refresh);
-    socket.on("room:member-demoted", refresh);
-    socket.on("room:creator-transferred", refresh);
-
-    return () => {
-      socket.off("room:member-added", refresh);
-      socket.off("room:member-removed", refresh);
-      socket.off("room:member-promoted", refresh);
-      socket.off("room:member-demoted", refresh);
-      socket.off("room:creator-transferred", refresh);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket, open, room.id]);
-
-  // Lock page scroll behind the panel (important on phones).
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  // Escape closes the panel, unless a dialog on top of it is open.
-  const hasOverlay =
-    isAddOpen || showPhoto || showPicker || Boolean(confirm) || isEditingName;
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {
-      if (e.key === "Escape" && !hasOverlay) onOpenChange(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, hasOverlay, onOpenChange]);
-
-  /* ----------------------------- actions ----------------------------- */
-
-  const applyRoomUpdate = (updated) => {
-    setInfo({ name: updated.name, avatarUrl: updated.avatarUrl });
-  };
-
-  const startEditingName = () => {
-    setNameDraft(info.name || "");
-    setNameStatus({ loading: false, error: "" });
-    setIsEditingName(true);
-  };
-
-  const saveName = async () => {
-    const trimmed = nameDraft.trim();
-
-    if (!trimmed) {
-      setNameStatus({ loading: false, error: "Group name is required." });
-      return;
-    }
-    if (trimmed === info.name) {
-      setIsEditingName(false);
-      return;
-    }
-
-    setNameStatus({ loading: true, error: "" });
-
-    try {
-      const { data } = await updateGroupNameRequest(room.id, trimmed);
-      applyRoomUpdate(data.room);
-      setNameStatus({ loading: false, error: "" });
-      setIsEditingName(false);
-      toast.success("Group renamed successfully");
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't rename the group.");
-      setNameStatus({
-        loading: false,
-        error: errorMsg,
-      });
-      toast.error(errorMsg);
-    }
-  };
-
-  // Throws on failure so the avatar picker can show the message and stay open.
-  const uploadGroupAvatar = async (file) => {
-    const previewUrl = URL.createObjectURL(file);
-    setAvatarPreview(previewUrl);
-    setPhotoStatus({ loading: true, action: "upload", error: "" });
-
-    try {
-      const { data } = await updateGroupAvatarRequest(room.id, file);
-      applyRoomUpdate(data.room);
-      setPhotoStatus({ loading: false, action: null, error: "" });
-      toast.success("Group photo updated");
-    } catch (err) {
-      const message = apiMessage(err, "Couldn't upload that image.");
-      setPhotoStatus({ loading: false, action: null, error: message });
-      toast.error(message);
-      throw new Error(message);
-    } finally {
-      setAvatarPreview(null);
-      URL.revokeObjectURL(previewUrl);
-    }
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-
-    try {
-      await uploadGroupAvatar(file);
-    } catch {
-      // The message is already shown under the photo.
-    }
-  };
-
-  const removePhoto = async () => {
-    setPhotoStatus({ loading: true, action: "remove", error: "" });
-
-    try {
-      const { data } = await removeGroupAvatarRequest(room.id);
-      applyRoomUpdate(data.room);
-      setShowPhoto(false);
-      setPhotoStatus({ loading: false, action: null, error: "" });
-      toast.success("Group photo removed");
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't remove the group photo.");
-      setPhotoStatus({
-        loading: false,
-        action: null,
-        error: errorMsg,
-      });
-      toast.error(errorMsg);
-    }
-  };
-
-  const removeMember = async (member) => {
-    setError("");
-    try {
-      const { data } = await removeRoomMemberRequest(room.id, member.id);
-      setMembers(data.members);
-      toast.success(`${member.name} removed from group`);
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't remove that person.");
-      setError(errorMsg);
-      toast.error(errorMsg);
-    }
-  };
-
-  const promoteMember = async (member) => {
-    setError("");
-    try {
-      const { data } = await makeRoomAdminRequest(room.id, member.id);
-      setMembers(data.members);
-      toast.success(`${member.name} is now an admin`);
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't make that person an admin.");
-      setError(errorMsg);
-      toast.error(errorMsg);
-    }
-  };
-
-  const demoteMember = async (member) => {
-    setError("");
-    try {
-      const { data } = await demoteRoomAdminRequest(room.id, member.id);
-      setMembers(data.members);
-      toast.success(`${member.name} dismissed as admin`);
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't dismiss that person as admin.");
-      setError(errorMsg);
-      toast.error(errorMsg);
-    }
-  };
-
-  const transferCreator = async (member) => {
-    setError("");
-    try {
-      const { data } = await transferCreatorRequest(room.id, member.id);
-      setMembers(data.members);
-      toast.success(`Transferred creator role to ${member.name}`);
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't transfer the creator role.");
-      setError(errorMsg);
-      toast.error(errorMsg);
-    }
-  };
-
-  const leaveGroup = async () => {
-    setError("");
-    try {
-      await leaveRoomRequest(room.id);
-      toast.success("You left the group");
-      // Nothing else to do here: the server emits "room:removed" to this user
-      // and the Dashboard removes the room and closes this panel.
-    } catch (err) {
-      const errorMsg = apiMessage(err, "Couldn't leave the group.");
-      setError(errorMsg);
-      toast.error(errorMsg);
-    }
-  };
-
-  const askRemovePhoto = () =>
-    setConfirm({
-      title: "Remove group photo?",
-      message: "Everyone will see the group's initial instead.",
-      confirmLabel: "Remove photo",
-      destructive: true,
-      onConfirm: removePhoto,
-    });
-
-  const askRemoveMember = (member) =>
-    setConfirm({
-      title: `Remove ${member.name}?`,
-      message: "They will no longer see messages in this group.",
-      confirmLabel: "Remove",
-      destructive: true,
-      onConfirm: () => removeMember(member),
-    });
-
-  const askPromoteMember = (member) =>
-    setConfirm({
-      title: `Make ${member.name} an admin?`,
-      message:
-        "Admins can rename the group, change its photo and manage members.",
-      confirmLabel: "Make admin",
-      onConfirm: () => promoteMember(member),
-    });
-
-  const askDemoteMember = (member) =>
-    setConfirm({
-      title: `Dismiss ${member.name} as admin?`,
-      message:
-        "They'll stay in the group as a regular member and won't be able to rename it, change its photo or manage members.",
-      confirmLabel: "Dismiss as admin",
-      destructive: true,
-      onConfirm: () => demoteMember(member),
-    });
-
-  const askTransferCreator = (member) =>
-    setConfirm({
-      title: `Make ${member.name} the group creator?`,
-      message:
-        "They'll become the creator and can't be dismissed as admin by other admins. You'll stay an admin, but another admin will be able to dismiss you.",
-      confirmLabel: "Transfer creator role",
-      destructive: true,
-      onConfirm: () => transferCreator(member),
-    });
-
-  const askLeaveGroup = () => {
-    const isLastMember = members.length === 1;
-    const isOnlyAdmin =
-      isAdmin && !members.some((m) => m.isAdmin && m.id !== currentUserId);
-
-    let message =
-      "You'll no longer see messages in this group. Someone will need to add you back if you want to rejoin.";
-
-    if (isLastMember) {
-      message = "You're the last member, so this group will be deleted.";
-    } else if (isOnlyAdmin) {
-      message =
-        "You're the only admin, so the longest-standing member will become admin. You'll no longer see messages in this group.";
-    }
-
-    setConfirm({
-      title: "Leave this group?",
-      message,
-      confirmLabel: "Leave group",
-      destructive: true,
-      onConfirm: leaveGroup,
-    });
-  };
-
-  /* ----------------------------- derived ----------------------------- */
-
-  const visibleMembers = useMemo(() => {
-    const q = memberSearch.trim().toLowerCase();
-    return [...members]
-      .filter((m) => !q || m.name.toLowerCase().includes(q))
-      .sort((a, b) => {
-        if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
-        if (a.id === currentUserId) return -1;
-        if (b.id === currentUserId) return 1;
-        return a.name.localeCompare(b.name);
-      });
-  }, [members, memberSearch, currentUserId]);
-
-  const isUploading = photoStatus.loading && photoStatus.action === "upload";
-  const isRemoving = photoStatus.loading && photoStatus.action === "remove";
-  const currentAvatar = avatarPreview || info.avatarUrl;
-
-  if (!open) return null;
-
-  /* ------------------------------ render ----------------------------- */
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop (desktop only matters; the panel covers the screen on phones) */}
-      <div
-        className="absolute inset-0 bg-black/60"
-        onClick={() => onOpenChange(false)}
-      />
-
-      <div className="relative z-10 flex h-dvh w-full flex-col bg-card md:max-w-sm md:border-l md:border-border">
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-          <p className="font-bold">Group info</p>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close"
-            className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {/* Hero: photo + name */}
-          <section className="flex flex-col items-center gap-4 border-b border-border px-4 py-6 text-center">
-            <button
-              type="button"
-              disabled={!info.avatarUrl}
-              onClick={() => setShowPhoto(true)}
-              aria-label={
-                info.avatarUrl ? "View group photo" : "No group photo"
-              }
-              className={cn(
-                "relative rounded-full",
-                info.avatarUrl &&
-                  "cursor-pointer transition-transform hover:scale-105 active:scale-95",
-              )}
-            >
-              <Avatar
-                src={currentAvatar}
-                name={info.name}
-                alt="Group photo"
-                className="h-28 w-28 text-3xl"
-              />
-              {photoStatus.loading && (
-                <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
-                  <Loader2 className="h-6 w-6 animate-spin text-white" />
-                </span>
-              )}
-            </button>
-
-            {/* Photo actions: admins only */}
-            {isAdmin && (
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  disabled={photoStatus.loading}
-                  onClick={() => setShowPicker(true)}
-                >
-                  <Sparkles className="mr-1.5 h-4 w-4" />
-                  Avatar picker
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9"
-                  disabled={photoStatus.loading}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Camera className="mr-1.5 h-4 w-4" />
-                  {isUploading ? "Uploading…" : "Upload"}
-                </Button>
-
-                {info.avatarUrl && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-9 border border-input text-destructive hover:text-destructive"
-                    disabled={photoStatus.loading}
-                    onClick={askRemovePhoto}
-                  >
-                    <Trash2 className="mr-1.5 h-4 w-4" />
-                    {isRemoving ? "Removing…" : "Remove"}
-                  </Button>
-                )}
-
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-              </div>
-            )}
-
-            {photoStatus.error && (
-              <p className="text-sm text-destructive">{photoStatus.error}</p>
-            )}
-
-            {/* Name */}
-            <div className="w-full">
-              {isEditingName ? (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    saveName();
-                  }}
-                  className="mx-auto w-full max-w-xs space-y-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={nameDraft}
-                      onChange={(e) => setNameDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.stopPropagation();
-                          setIsEditingName(false);
-                        }
-                      }}
-                      maxLength={MAX_GROUP_NAME}
-                      autoFocus
-                      aria-label="Group name"
-                      className="text-base md:text-sm"
-                    />
-                    <Button
-                      type="submit"
-                      size="icon"
-                      className="shrink-0"
-                      disabled={nameStatus.loading}
-                      aria-label="Save group name"
-                    >
-                      {nameStatus.loading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Check className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="shrink-0"
-                      disabled={nameStatus.loading}
-                      onClick={() => setIsEditingName(false)}
-                      aria-label="Cancel renaming"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-destructive">{nameStatus.error}</span>
-                    <span className="text-muted-foreground">
-                      {nameDraft.length}/{MAX_GROUP_NAME}
-                    </span>
-                  </div>
-                </form>
-              ) : (
-                <div className="flex items-center justify-center gap-1.5">
-                  <h2 className="min-w-0 wrap-break-word text-xl font-bold">
-                    {info.name}
-                  </h2>
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={startEditingName}
-                      aria-label="Rename group"
-                      className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-              )}
-
-              <p className="mt-1 text-sm text-muted-foreground">
-                Group · {memberCount} {memberCount === 1 ? "member" : "members"}
-              </p>
-            </div>
-          </section>
-
-          {/* Members */}
-          <section className="space-y-3 p-4">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">Members</p>
-              {isAdmin && (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-9"
-                  onClick={() => setIsAddOpen(true)}
-                >
-                  <UserPlus className="mr-1.5 h-4 w-4" />
-                  Add member
-                </Button>
-              )}
-            </div>
-
-            {members.length > 6 && (
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder="Search members…"
-                  aria-label="Search members"
-                  className="pl-9 text-base md:text-sm"
-                />
-              </div>
-            )}
-
-            {error && <p className="text-sm text-destructive">{error}</p>}
-
-            {isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : (
-              <ul className="space-y-1">
-                {visibleMembers.map((member) => {
-                  const isMe = member.id === currentUserId;
-                  // Admins can promote/remove regular members, and dismiss
-                  // other admins. Never themselves.
-                  const canManage = isAdmin && !member.isAdmin && !isMe;
-                  const canDemote =
-                    isAdmin && member.isAdmin && !isMe && !member.isCreator;
-
-                  const verifyState = verification.statuses[member.id]?.state;
-                  const VerifyIcon =
-                    verifyState === "verified"
-                      ? ShieldCheck
-                      : verifyState === "changed"
-                        ? ShieldAlert
-                        : Shield;
-
-                  return (
-                    <li
-                      key={member.id}
-                      className="flex items-center gap-3 rounded-lg p-2 hover:bg-accent"
-                    >
-                      <Avatar
-                        src={member.avatarUrl}
-                        name={member.name}
-                        className="h-10 w-10 shrink-0 text-sm"
-                      />
-
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold">
-                          {member.name}
-                          {isMe && (
-                            <span className="font-normal text-muted-foreground">
-                              {" "}
-                              (you)
-                            </span>
-                          )}
-                        </p>
-                        {member.isAdmin ? (
-                          <p className="flex items-center gap-1 text-xs text-amber-500">
-                            <Crown className="h-3 w-3" aria-hidden="true" />
-                            {member.isCreator ? "Creator" : "Admin"}
-                          </p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground">
-                            Member
-                          </p>
-                        )}
-                      </div>
-
-                      {!isMe && verification.statuses[member.id] && (
-                        <button
-                          type="button"
-                          onClick={() => setVerifyUserId(member.id)}
-                          aria-label={`Verify ${member.name}`}
-                          title={
-                            verifyState === "verified"
-                              ? "Verified. View security code"
-                              : verifyState === "changed"
-                                ? "Security code changed. Review it"
-                                : "Verify security code"
-                          }
-                          className={cn(
-                            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-background",
-                            verifyState === "verified" && "text-emerald-500",
-                            verifyState === "changed" && "text-amber-500",
-                            verifyState === "unverified" &&
-                              "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          <VerifyIcon className="h-4 w-4" />
-                        </button>
-                      )}
-
-                      {canManage && (
-                        <div className="flex shrink-0 items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => askPromoteMember(member)}
-                            aria-label={`Make ${member.name} an admin`}
-                            title="Make admin"
-                            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
-                          >
-                            <Crown className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => askRemoveMember(member)}
-                            aria-label={`Remove ${member.name}`}
-                            title="Remove from group"
-                            className="flex h-9 w-9 items-center justify-center rounded-md text-destructive hover:bg-destructive/10"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-
-                      {canDemote && (
-                        <div className="flex shrink-0 items-center gap-1">
-                          {isCreator && (
-                            <button
-                              type="button"
-                              onClick={() => askTransferCreator(member)}
-                              aria-label={`Make ${member.name} the group creator`}
-                              title="Transfer creator role"
-                              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
-                            >
-                              <ArrowRightLeft className="h-4 w-4" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => askDemoteMember(member)}
-                            aria-label={`Dismiss ${member.name} as admin`}
-                            title="Dismiss as admin"
-                            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
-                          >
-                            <ShieldOff className="h-4 w-4" />
-                          </button>
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-
-                {visibleMembers.length === 0 && (
-                  <p className="p-2 text-sm text-muted-foreground">
-                    No members match “{memberSearch}”.
-                  </p>
-                )}
-              </ul>
-            )}
-          </section>
-
-          {/* Leave group: every member, admin or not */}
-          <section className="border-t border-border p-4">
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-9 w-full border border-input text-destructive hover:text-destructive"
-              disabled={isLoading}
-              onClick={askLeaveGroup}
-            >
-              <LogOut className="mr-1.5 h-4 w-4" />
-              Leave group
-            </Button>
-          </section>
-        </div>
-      </div>
-
-      {/* Add member */}
-      <AddMemberPopup
-        open={isAddOpen}
-        onOpenChange={setIsAddOpen}
-        roomId={room.id}
-        existingMemberIds={members.map((member) => member.id)}
-        onAdded={(newMembers) => {
-          setMembers(newMembers);
-          setIsAddOpen(false);
-        }}
-      />
-
-      {/* Confirm dialog (remove member / promote / remove photo) */}
-      <ConfirmDialog config={confirm} onClose={() => setConfirm(null)} />
-
-      <SafetyNumberDialog
-        open={Boolean(verifyUserId)}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) setVerifyUserId(null);
-        }}
-        me={{ id: currentUserId, devices: verification.myDevices }}
-        contact={verifyUserId ? verification.statuses[verifyUserId] : null}
-      />
-
-      {/* Full-size group photo */}
-      {showPhoto && info.avatarUrl && (
-        <div
-          className="fixed inset-0 z-70 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setShowPhoto(false);
-          }}
-        >
-          <div className="relative max-w-[90vw]">
-            <button
-              type="button"
-              onClick={() => setShowPhoto(false)}
-              aria-label="Close photo"
-              className="absolute -right-3 -top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background text-foreground shadow-lg transition hover:scale-105 hover:bg-muted active:scale-95"
-            >
-              <X className="h-5 w-5" />
-            </button>
-            <div className="overflow-hidden rounded-2xl border border-white/20 bg-black/20 p-1 shadow-2xl shadow-black/40">
-              <img
-                src={info.avatarUrl}
-                alt={`${info.name} group photo`}
-                className="block max-h-[80vh] max-w-[90vw] rounded-xl object-contain"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DiceBear avatar picker for the group photo */}
-      {showPicker && (
-        <Suspense fallback={null}>
-          <AvatarPicker
-            initialSeed={info.name || ""}
-            onSave={uploadGroupAvatar}
-            onClose={() => setShowPicker(false)}
-          />
-        </Suspense>
-      )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Confirm dialog (bottom sheet on phones, centered card on desktop)   */
-/* ------------------------------------------------------------------ */
-
+// Confirmation dialog (bottom sheet on mobile, modal card on desktop)
 function ConfirmDialog({ config, onClose }) {
   const [busy, setBusy] = useState(false);
 
   if (!config) return null;
 
-  const run = async () => {
+  const handleRun = async () => {
     setBusy(true);
     try {
       await config.onConfirm();
@@ -930,7 +101,7 @@ function ConfirmDialog({ config, onClose }) {
             type="button"
             variant={config.destructive ? "destructive" : "default"}
             disabled={busy}
-            onClick={run}
+            onClick={handleRun}
           >
             {busy ? "Working…" : config.confirmLabel}
           </Button>
@@ -940,10 +111,7 @@ function ConfirmDialog({ config, onClose }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Add member popup                                                    */
-/* ------------------------------------------------------------------ */
-
+// Modal dialog allowing group admins to search for and add registered users
 function AddMemberPopup({
   open,
   onOpenChange,
@@ -957,7 +125,6 @@ function AddMemberPopup({
   const [addingId, setAddingId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Load all users when the popup opens.
   useEffect(() => {
     if (!open) return;
 
@@ -974,7 +141,6 @@ function AddMemberPopup({
 
   if (!open) return null;
 
-  // Only people who aren't already members and match the search.
   const available = users.filter(
     (user) =>
       !existingMemberIds.includes(user._id) &&
@@ -1063,6 +229,843 @@ function AddMemberPopup({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Full-size group photo modal overlay
+function GroupPhotoModal({ open, avatarUrl, groupName, onClose }) {
+  if (!open || !avatarUrl) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-70 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative max-w-[90vw]">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close photo"
+          className="absolute -right-3 -top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background text-foreground shadow-lg transition hover:scale-105 hover:bg-muted active:scale-95"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <div className="overflow-hidden rounded-2xl border border-white/20 bg-black/20 p-1 shadow-2xl shadow-black/40">
+          <img
+            src={avatarUrl}
+            alt={`${groupName} group photo`}
+            className="block max-h-[80vh] max-w-[90vw] rounded-xl object-contain"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Individual member list row with role labels, security verification, and administrative actions
+function MemberItem({
+  member,
+  isMe,
+  isAdmin,
+  isCreator,
+  verificationStatus,
+  onVerify,
+  onPromote,
+  onRemove,
+  onDemote,
+  onTransferCreator,
+}) {
+  const canManage = isAdmin && !member.isAdmin && !isMe;
+  const canDemote = isAdmin && member.isAdmin && !isMe && !member.isCreator;
+
+  const verifyState = verificationStatus?.state;
+  const VerifyIcon =
+    verifyState === "verified"
+      ? ShieldCheck
+      : verifyState === "changed"
+        ? ShieldAlert
+        : Shield;
+
+  return (
+    <li className="flex items-center gap-3 rounded-lg p-2 hover:bg-accent">
+      <Avatar
+        src={member.avatarUrl}
+        name={member.name}
+        className="h-10 w-10 shrink-0 text-sm"
+      />
+
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">
+          {member.name}
+          {isMe && (
+            <span className="font-normal text-muted-foreground"> (you)</span>
+          )}
+        </p>
+        {member.isAdmin ? (
+          <p className="flex items-center gap-1 text-xs text-amber-500">
+            <Crown className="h-3 w-3" aria-hidden="true" />
+            {member.isCreator ? "Creator" : "Admin"}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">Member</p>
+        )}
+      </div>
+
+      {!isMe && verificationStatus && (
+        <button
+          type="button"
+          onClick={() => onVerify(member.id)}
+          aria-label={`Verify ${member.name}`}
+          title={
+            verifyState === "verified"
+              ? "Verified. View security code"
+              : verifyState === "changed"
+                ? "Security code changed. Review it"
+                : "Verify security code"
+          }
+          className={cn(
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-background",
+            verifyState === "verified" && "text-emerald-500",
+            verifyState === "changed" && "text-amber-500",
+            verifyState === "unverified" &&
+              "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <VerifyIcon className="h-4 w-4" />
+        </button>
+      )}
+
+      {canManage && (
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onPromote(member)}
+            aria-label={`Make ${member.name} an admin`}
+            title="Make admin"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            <Crown className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onRemove(member)}
+            aria-label={`Remove ${member.name}`}
+            title="Remove from group"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-destructive hover:bg-destructive/10"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {canDemote && (
+        <div className="flex shrink-0 items-center gap-1">
+          {isCreator && (
+            <button
+              type="button"
+              onClick={() => onTransferCreator(member)}
+              aria-label={`Make ${member.name} the group creator`}
+              title="Transfer creator role"
+              className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+            >
+              <ArrowRightLeft className="h-4 w-4" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onDemote(member)}
+            aria-label={`Dismiss ${member.name} as admin`}
+            title="Dismiss as admin"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground"
+          >
+            <ShieldOff className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+// Group info panel coordinating member list, administrative actions, and group profile updates
+export function MembersPanel({
+  open,
+  onOpenChange,
+  room,
+  currentUserId,
+  socket,
+}) {
+  // Member roster and search state
+  const [members, setMembers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [memberSearch, setMemberSearch] = useState("");
+
+  // Group name and avatar state
+  const [info, setInfo] = useState({
+    name: room.name,
+    avatarUrl: room.avatarUrl,
+  });
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameStatus, setNameStatus] = useState({ loading: false, error: "" });
+  const [photoStatus, setPhotoStatus] = useState({
+    loading: false,
+    action: null,
+    error: "",
+  });
+  const [avatarPreview, setAvatarPreview] = useState(null);
+
+  // Modal dialog states
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [showPhoto, setShowPhoto] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [confirm, setConfirm] = useState(null);
+  const [verifyUserId, setVerifyUserId] = useState(null);
+
+  // References
+  const fileInputRef = useRef(null);
+
+  // Security verification hook
+  const verification = useRoomVerification({ room, currentUserId, socket });
+
+  // Admin and creator status derived from loaded member list
+  const isAdmin =
+    members.find((m) => m.id === currentUserId)?.isAdmin ?? room.isAdmin;
+  const isCreator =
+    members.find((m) => m.id === currentUserId)?.isCreator ?? false;
+  const memberCount = isLoading ? room.memberCount : members.length;
+
+  // Filtered and sorted member list
+  const visibleMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase();
+    return [...members]
+      .filter((m) => !q || m.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
+        if (a.id === currentUserId) return -1;
+        if (b.id === currentUserId) return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [members, memberSearch, currentUserId]);
+
+  const isUploading = photoStatus.loading && photoStatus.action === "upload";
+  const isRemoving = photoStatus.loading && photoStatus.action === "remove";
+  const currentAvatar = avatarPreview || info.avatarUrl;
+  const hasOverlay =
+    isAddOpen || showPhoto || showPicker || Boolean(confirm) || isEditingName;
+
+  // Fetches member list from backend API
+  const loadMembers = useCallback(async () => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const { data } = await getRoomMembersRequest(room.id);
+      setMembers(data.members);
+    } catch (err) {
+      setError(apiMessage(err, "Couldn't load members."));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [room.id]);
+
+  // Synchronize internal state with parent room props
+  useEffect(() => {
+    setInfo({ name: room.name, avatarUrl: room.avatarUrl });
+  }, [room.id, room.name, room.avatarUrl]);
+
+  // Initial load and state reset when panel opens
+  useEffect(() => {
+    if (open) {
+      setMembers([]);
+      setMemberSearch("");
+      setIsEditingName(false);
+      loadMembers();
+    }
+  }, [open, loadMembers]);
+
+  // Real-time socket events for roster updates
+  useEffect(() => {
+    if (!socket || !open) return;
+
+    const refresh = ({ roomId }) => {
+      if (roomId === room.id) loadMembers();
+    };
+
+    socket.on("room:member-added", refresh);
+    socket.on("room:member-removed", refresh);
+    socket.on("room:member-promoted", refresh);
+    socket.on("room:member-demoted", refresh);
+    socket.on("room:creator-transferred", refresh);
+
+    return () => {
+      socket.off("room:member-added", refresh);
+      socket.off("room:member-removed", refresh);
+      socket.off("room:member-promoted", refresh);
+      socket.off("room:member-demoted", refresh);
+      socket.off("room:creator-transferred", refresh);
+    };
+  }, [socket, open, room.id, loadMembers]);
+
+  // Locks page scroll while panel is active
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  // Closes panel on Escape unless a dialog overlay is open
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === "Escape" && !hasOverlay) onOpenChange(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, hasOverlay, onOpenChange]);
+
+  // Updates room profile cache
+  const applyRoomUpdate = (updated) => {
+    setInfo({ name: updated.name, avatarUrl: updated.avatarUrl });
+  };
+
+  // Group name editing handlers
+  const startEditingName = () => {
+    setNameDraft(info.name || "");
+    setNameStatus({ loading: false, error: "" });
+    setIsEditingName(true);
+  };
+
+  const saveName = async () => {
+    const trimmed = nameDraft.trim();
+
+    if (!trimmed) {
+      setNameStatus({ loading: false, error: "Group name is required." });
+      return;
+    }
+    if (trimmed === info.name) {
+      setIsEditingName(false);
+      return;
+    }
+
+    setNameStatus({ loading: true, error: "" });
+
+    try {
+      const { data } = await updateGroupNameRequest(room.id, trimmed);
+      applyRoomUpdate(data.room);
+      setNameStatus({ loading: false, error: "" });
+      setIsEditingName(false);
+      toast.success("Group renamed successfully");
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't rename the group.");
+      setNameStatus({ loading: false, error: errorMsg });
+      toast.error(errorMsg);
+    }
+  };
+
+  // Group avatar management handlers
+  const uploadGroupAvatar = async (file) => {
+    const previewUrl = URL.createObjectURL(file);
+    setAvatarPreview(previewUrl);
+    setPhotoStatus({ loading: true, action: "upload", error: "" });
+
+    try {
+      const { data } = await updateGroupAvatarRequest(room.id, file);
+      applyRoomUpdate(data.room);
+      setPhotoStatus({ loading: false, action: null, error: "" });
+      toast.success("Group photo updated");
+    } catch (err) {
+      const message = apiMessage(err, "Couldn't upload that image.");
+      setPhotoStatus({ loading: false, action: null, error: message });
+      toast.error(message);
+      throw new Error(message);
+    } finally {
+      setAvatarPreview(null);
+      URL.revokeObjectURL(previewUrl);
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    try {
+      await uploadGroupAvatar(file);
+    } catch {
+      // Error message is captured in photoStatus
+    }
+  };
+
+  const removePhoto = async () => {
+    setPhotoStatus({ loading: true, action: "remove", error: "" });
+
+    try {
+      const { data } = await removeGroupAvatarRequest(room.id);
+      applyRoomUpdate(data.room);
+      setShowPhoto(false);
+      setPhotoStatus({ loading: false, action: null, error: "" });
+      toast.success("Group photo removed");
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't remove the group photo.");
+      setPhotoStatus({ loading: false, action: null, error: errorMsg });
+      toast.error(errorMsg);
+    }
+  };
+
+  // Member management handlers
+  const removeMember = async (member) => {
+    setError("");
+    try {
+      const { data } = await removeRoomMemberRequest(room.id, member.id);
+      setMembers(data.members);
+      toast.success(`${member.name} removed from group`);
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't remove that person.");
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+  };
+
+  const promoteMember = async (member) => {
+    setError("");
+    try {
+      const { data } = await makeRoomAdminRequest(room.id, member.id);
+      setMembers(data.members);
+      toast.success(`${member.name} is now an admin`);
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't make that person an admin.");
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+  };
+
+  const demoteMember = async (member) => {
+    setError("");
+    try {
+      const { data } = await demoteRoomAdminRequest(room.id, member.id);
+      setMembers(data.members);
+      toast.success(`${member.name} dismissed as admin`);
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't dismiss that person as admin.");
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+  };
+
+  const transferCreator = async (member) => {
+    setError("");
+    try {
+      const { data } = await transferCreatorRequest(room.id, member.id);
+      setMembers(data.members);
+      toast.success(`Transferred creator role to ${member.name}`);
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't transfer the creator role.");
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+  };
+
+  const leaveGroup = async () => {
+    setError("");
+    try {
+      await leaveRoomRequest(room.id);
+      toast.success("You left the group");
+    } catch (err) {
+      const errorMsg = apiMessage(err, "Couldn't leave the group.");
+      setError(errorMsg);
+      toast.error(errorMsg);
+    }
+  };
+
+  // Confirmation dialog prompts
+  const askRemovePhoto = () =>
+    setConfirm({
+      title: "Remove group photo?",
+      message: "Everyone will see the group's initial instead.",
+      confirmLabel: "Remove photo",
+      destructive: true,
+      onConfirm: removePhoto,
+    });
+
+  const askRemoveMember = (member) =>
+    setConfirm({
+      title: `Remove ${member.name}?`,
+      message: "They will no longer see messages in this group.",
+      confirmLabel: "Remove",
+      destructive: true,
+      onConfirm: () => removeMember(member),
+    });
+
+  const askPromoteMember = (member) =>
+    setConfirm({
+      title: `Make ${member.name} an admin?`,
+      message:
+        "Admins can rename the group, change its photo and manage members.",
+      confirmLabel: "Make admin",
+      onConfirm: () => promoteMember(member),
+    });
+
+  const askDemoteMember = (member) =>
+    setConfirm({
+      title: `Dismiss ${member.name} as admin?`,
+      message:
+        "They'll stay in the group as a regular member and won't be able to rename it, change its photo or manage members.",
+      confirmLabel: "Dismiss as admin",
+      destructive: true,
+      onConfirm: () => demoteMember(member),
+    });
+
+  const askTransferCreator = (member) =>
+    setConfirm({
+      title: `Make ${member.name} the group creator?`,
+      message:
+        "They'll become the creator and can't be dismissed as admin by other admins. You'll stay an admin, but another admin will be able to dismiss you.",
+      confirmLabel: "Transfer creator role",
+      destructive: true,
+      onConfirm: () => transferCreator(member),
+    });
+
+  const askLeaveGroup = () => {
+    const isLastMember = members.length === 1;
+    const isOnlyAdmin =
+      isAdmin && !members.some((m) => m.isAdmin && m.id !== currentUserId);
+
+    let message =
+      "You'll no longer see messages in this group. Someone will need to add you back if you want to rejoin.";
+
+    if (isLastMember) {
+      message = "You're the last member, so this group will be deleted.";
+    } else if (isOnlyAdmin) {
+      message =
+        "You're the only admin, so the longest-standing member will become admin. You'll no longer see messages in this group.";
+    }
+
+    setConfirm({
+      title: "Leave this group?",
+      message,
+      confirmLabel: "Leave group",
+      destructive: true,
+      onConfirm: leaveGroup,
+    });
+  };
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Background backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        onClick={() => onOpenChange(false)}
+      />
+
+      <div className="relative z-10 flex h-dvh w-full flex-col bg-card md:max-w-sm md:border-l md:border-border">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <p className="font-bold">Group info</p>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            aria-label="Close"
+            className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Scrollable content body */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {/* Group hero profile section */}
+          <section className="flex flex-col items-center gap-4 border-b border-border px-4 py-6 text-center">
+            <button
+              type="button"
+              disabled={!info.avatarUrl}
+              onClick={() => setShowPhoto(true)}
+              aria-label={
+                info.avatarUrl ? "View group photo" : "No group photo"
+              }
+              className={cn(
+                "relative rounded-full",
+                info.avatarUrl &&
+                  "cursor-pointer transition-transform hover:scale-105 active:scale-95",
+              )}
+            >
+              <Avatar
+                src={currentAvatar}
+                name={info.name}
+                alt="Group photo"
+                className="h-28 w-28 text-3xl"
+              />
+              {photoStatus.loading && (
+                <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50">
+                  <Loader2 className="h-6 w-6 animate-spin text-white" />
+                </span>
+              )}
+            </button>
+
+            {/* Photo management actions for admins */}
+            {isAdmin && (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  disabled={photoStatus.loading}
+                  onClick={() => setShowPicker(true)}
+                >
+                  <Sparkles className="mr-1.5 h-4 w-4" />
+                  Avatar picker
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9"
+                  disabled={photoStatus.loading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Camera className="mr-1.5 h-4 w-4" />
+                  {isUploading ? "Uploading…" : "Upload"}
+                </Button>
+
+                {info.avatarUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 border border-input text-destructive hover:text-destructive"
+                    disabled={photoStatus.loading}
+                    onClick={askRemovePhoto}
+                  >
+                    <Trash2 className="mr-1.5 h-4 w-4" />
+                    {isRemoving ? "Removing…" : "Remove"}
+                  </Button>
+                )}
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+              </div>
+            )}
+
+            {photoStatus.error && (
+              <p className="text-sm text-destructive">{photoStatus.error}</p>
+            )}
+
+            {/* Group title and editing */}
+            <div className="w-full">
+              {isEditingName ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    saveName();
+                  }}
+                  className="mx-auto w-full max-w-xs space-y-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={nameDraft}
+                      onChange={(e) => setNameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setIsEditingName(false);
+                        }
+                      }}
+                      maxLength={MAX_GROUP_NAME}
+                      autoFocus
+                      aria-label="Group name"
+                      className="text-base md:text-sm"
+                    />
+                    <Button
+                      type="submit"
+                      size="icon"
+                      className="shrink-0"
+                      disabled={nameStatus.loading}
+                      aria-label="Save group name"
+                    >
+                      {nameStatus.loading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="shrink-0"
+                      disabled={nameStatus.loading}
+                      onClick={() => setIsEditingName(false)}
+                      aria-label="Cancel renaming"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-destructive">{nameStatus.error}</span>
+                    <span className="text-muted-foreground">
+                      {nameDraft.length}/{MAX_GROUP_NAME}
+                    </span>
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-center justify-center gap-1.5">
+                  <h2 className="min-w-0 wrap-break-word text-xl font-bold">
+                    {info.name}
+                  </h2>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={startEditingName}
+                      aria-label="Rename group"
+                      className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <p className="mt-1 text-sm text-muted-foreground">
+                Group · {memberCount} {memberCount === 1 ? "member" : "members"}
+              </p>
+            </div>
+          </section>
+
+          {/* Members section */}
+          <section className="space-y-3 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Members</p>
+              {isAdmin && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9"
+                  onClick={() => setIsAddOpen(true)}
+                >
+                  <UserPlus className="mr-1.5 h-4 w-4" />
+                  Add member
+                </Button>
+              )}
+            </div>
+
+            {members.length > 6 && (
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={memberSearch}
+                  onChange={(e) => setMemberSearch(e.target.value)}
+                  placeholder="Search members…"
+                  aria-label="Search members"
+                  className="pl-9 text-base md:text-sm"
+                />
+              </div>
+            )}
+
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : (
+              <ul className="space-y-1">
+                {visibleMembers.map((member) => (
+                  <MemberItem
+                    key={member.id}
+                    member={member}
+                    isMe={member.id === currentUserId}
+                    isAdmin={isAdmin}
+                    isCreator={isCreator}
+                    verificationStatus={verification.statuses[member.id]}
+                    onVerify={setVerifyUserId}
+                    onPromote={askPromoteMember}
+                    onRemove={askRemoveMember}
+                    onDemote={askDemoteMember}
+                    onTransferCreator={askTransferCreator}
+                  />
+                ))}
+
+                {visibleMembers.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">
+                    No members match “{memberSearch}”.
+                  </p>
+                )}
+              </ul>
+            )}
+          </section>
+
+          {/* Leave group button */}
+          <section className="border-t border-border p-4">
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-9 w-full border border-input text-destructive hover:text-destructive"
+              disabled={isLoading}
+              onClick={askLeaveGroup}
+            >
+              <LogOut className="mr-1.5 h-4 w-4" />
+              Leave group
+            </Button>
+          </section>
+        </div>
+      </div>
+
+      {/* Add member modal */}
+      <AddMemberPopup
+        open={isAddOpen}
+        onOpenChange={setIsAddOpen}
+        roomId={room.id}
+        existingMemberIds={members.map((member) => member.id)}
+        onAdded={(newMembers) => {
+          setMembers(newMembers);
+          setIsAddOpen(false);
+        }}
+      />
+
+      {/* Confirmation bottom sheet / modal */}
+      <ConfirmDialog config={confirm} onClose={() => setConfirm(null)} />
+
+      {/* Safety number security dialog */}
+      <SafetyNumberDialog
+        open={Boolean(verifyUserId)}
+        onOpenChange={(isOpen) => {
+          if (!isOpen) setVerifyUserId(null);
+        }}
+        me={{ id: currentUserId, devices: verification.myDevices }}
+        contact={verifyUserId ? verification.statuses[verifyUserId] : null}
+      />
+
+      {/* Full-size group photo modal */}
+      <GroupPhotoModal
+        open={showPhoto}
+        avatarUrl={info.avatarUrl}
+        groupName={info.name}
+        onClose={() => setShowPhoto(false)}
+      />
+
+      {/* Avatar picker dialog */}
+      {showPicker && (
+        <Suspense fallback={null}>
+          <AvatarPicker
+            initialSeed={info.name || ""}
+            onSave={uploadGroupAvatar}
+            onClose={() => setShowPicker(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
