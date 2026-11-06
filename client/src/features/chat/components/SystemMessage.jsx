@@ -1,7 +1,9 @@
 import React from "react";
 
-// Wording depends on who's looking: "You added Bob" vs "Alice added Bob".
+// Formats viewer-relative wording for system events (e.g. "You added Bob" vs "Alice added Bob")
 export function getSystemText(system, currentUserId) {
+  if (!system) return null;
+
   const { kind, actorId, actorName, targetId, targetName, meta } = system;
 
   const actor = actorId === currentUserId ? "You" : actorName || "Someone";
@@ -40,11 +42,13 @@ export function getSystemText(system, currentUserId) {
   }
 }
 
+// Centered system event message pill badge (e.g. participant added, group renamed)
 export function SystemMessage({ message, currentUserId }) {
-  // Falls back to the server's neutral sentence for unknown kinds.
   const text =
-    (message.system && getSystemText(message.system, currentUserId)) ||
-    message.text;
+    (message?.system && getSystemText(message.system, currentUserId)) ||
+    message?.text;
+
+  if (!text) return null;
 
   return (
     <div className="mb-3 flex justify-center">
