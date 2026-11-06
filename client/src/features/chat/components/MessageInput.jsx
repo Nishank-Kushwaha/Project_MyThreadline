@@ -480,9 +480,11 @@ export function MessageInput({
                       playsInline
                       className="h-full w-full object-cover"
                     />
-                    <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
-                      GIF
-                    </span>
+                    {Boolean(selectedFile?.isGif) && (
+                      <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
+                        GIF
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <img

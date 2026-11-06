@@ -11,13 +11,17 @@ const GIF_TOKEN = /(^|[._\-\s])gif([._\-\s]|$)/;
 export function isGifVideo(media, kind) {
   if (!media) return false;
 
+  // Explicit flag takes highest priority
+  if (media.isGif === false || media.gifPlayback === false) return false;
   if (media.isGif === true || media.gifPlayback === true) return true;
 
+  // MIME check for genuine raw gif formats
   const mime = String(
     media.fileType || media.mimeType || media.mimetype || media.contentType || media.type || "",
   ).toLowerCase();
   if (GIF_MIME.test(mime)) return true;
 
+  // Extension check for raw gif files
   const name = String(
     media.fileName ||
       media.filename ||
@@ -28,8 +32,8 @@ export function isGifVideo(media, kind) {
   ).toLowerCase();
   if (GIF_EXT.test(name)) return true;
 
-  // Videos only: "gif" as its own word in the name, or ending with .gif.mp4
-  return (kind === "video" || mime.startsWith("video/")) && (GIF_TOKEN.test(name) || name.includes(".gif.mp4"));
+  // Converted GIF video extension: must end with .gif.mp4
+  return name.endsWith(".gif.mp4");
 }
 
 // A chat "GIF" is a short silent looping MP4: first frame and a GIF badge, tap to play a few loops, tap again to replay
