@@ -5,35 +5,28 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Button } from "@/components/ui/button";
 import {
+  BarChart2,
+  File,
   Loader2,
+  Mic,
   Paperclip,
+  Reply,
   Send,
   X,
-  File,
-  Reply,
-  Mic,
-  BarChart2,
 } from "lucide-react";
-import { formatFileSize } from "@/features/e2ee/lib/media";
-
-import { GifPickerButton } from "./media/GifPickerButton";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { gifToFile, isGifFile } from "@/lib/utils";
-import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
+import { formatFileSize } from "@/features/e2ee/lib/media";
+import { GifPickerButton } from "./media/GifPickerButton";
 import { VoiceRecorder } from "./media/VoiceRecorder";
 import { CreatePollDialog } from "./polls/CreatePollDialog";
-import { toast } from "sonner";
+import { LinkPreviewCard, extractFirstUrl } from "./LinkPreview";
 
-// 15 MiB. Must stay equal to the Multer `limits.fileSize` on the backend.
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
-// Extensions offered in the file picker. `accept` is only a hint to the browser
-// (users can switch the dialog to "All files"), so handleFileSelect re-checks
-// against the same list. This is UX only: the backend must enforce its own
-// allowlist and validate file content.
 const ACCEPTED_EXTENSIONS = [
-  // Documents
   ".pdf",
   ".doc",
   ".docx",
@@ -41,7 +34,6 @@ const ACCEPTED_EXTENSIONS = [
   ".xlsx",
   ".ppt",
   ".pptx",
-  // Text and data
   ".txt",
   ".csv",
   ".json",
@@ -50,7 +42,6 @@ const ACCEPTED_EXTENSIONS = [
   ".xml",
   ".yaml",
   ".yml",
-  // Source code
   ".js",
   ".jsx",
   ".ts",
@@ -63,15 +54,15 @@ const ACCEPTED_EXTENSIONS = [
   ".h",
   ".java",
   ".sql",
-  // Archives
   ".zip",
   ".rar",
   ".7z",
   ".tar",
   ".gz",
 ];
+
 const ACCEPTED_MIME_PREFIXES = ["image/", "audio/", "video/"];
-// Used only for validation: some OSes report an empty MIME type for these.
+
 const MEDIA_EXTENSIONS = [
   ".jpg",
   ".jpeg",
@@ -97,23 +88,162 @@ const MEDIA_EXTENSIONS = [
   ".avi",
   ".ogv",
 ];
+
 const ALLOWED_EXTENSIONS = new Set([
   ...ACCEPTED_EXTENSIONS,
   ...MEDIA_EXTENSIONS,
 ]);
+
 const ACCEPT_ATTRIBUTE = [
-  ...ACCEPTED_MIME_PREFIXES.map((p) => `${p}*`),
+  ...ACCEPTED_MIME_PREFIXES.map((prefix) => `${prefix}*`),
   ...ACCEPTED_EXTENSIONS,
 ].join(",");
 
+// Validates whether the selected file extension or MIME type is allowed
 function isAllowedFile(file) {
   const type = (file.type || "").toLowerCase();
-  if (ACCEPTED_MIME_PREFIXES.some((prefix) => type.startsWith(prefix)))
+  if (ACCEPTED_MIME_PREFIXES.some((prefix) => type.startsWith(prefix))) {
     return true;
+  }
   const dot = file.name.lastIndexOf(".");
   return dot > 0 && ALLOWED_EXTENSIONS.has(file.name.slice(dot).toLowerCase());
 }
 
+// Checks file size and format constraints
+function validateFile(file) {
+  if (file.size === 0) return "This file is empty.";
+  if (file.size > MAX_FILE_SIZE_BYTES) return "File exceeds the 15 MiB limit.";
+  if (!isAllowedFile(file)) return "This file type isn't supported.";
+  return null;
+}
+
+// Quoted reply banner preview above input
+function ReplyBanner({ replyingTo, onCancel }) {
+  if (!replyingTo) return null;
+
+  return (
+    <div className="relative mb-2 flex items-center justify-between overflow-hidden rounded-xl border border-border bg-secondary/80 p-2.5 pl-3.5 shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="absolute inset-y-0 left-0 w-1 bg-primary" />
+      <div className="flex min-w-0 items-center gap-2.5">
+        <Reply className="h-4 w-4 shrink-0 text-primary" />
+        <div className="min-w-0 text-xs">
+          <span className="block truncate font-semibold text-primary">
+            {replyingTo.senderName || "Message"}
+          </span>
+          <p className="truncate text-[11px] text-muted-foreground">
+            {replyingTo.text ||
+              (replyingTo.mediaType
+                ? `[${replyingTo.mediaType.toUpperCase()}]`
+                : "Attachment")}
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label="Cancel reply"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+// Preview card for selected attachments prior to sending
+function FilePreviewCard({
+  file,
+  preview,
+  isEncrypted,
+  isSending,
+  onRemove,
+}) {
+  if (!file) return null;
+
+  const isVideoOrGif = file.type?.startsWith("video/") || file.isGif;
+
+  return (
+    <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
+      <div className="flex items-center gap-3 overflow-hidden">
+        {preview ? (
+          isVideoOrGif ? (
+            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-black">
+              <video
+                src={preview}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="h-full w-full object-cover"
+              />
+              {Boolean(file.isGif) && (
+                <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
+                  GIF
+                </span>
+              )}
+            </div>
+          ) : (
+            <img
+              src={preview}
+              alt="Upload preview"
+              className="h-12 w-12 shrink-0 rounded-lg object-cover"
+            />
+          )
+        ) : (
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <File className="h-6 w-6" />
+          </div>
+        )}
+
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-foreground">
+            {file.name}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {formatFileSize(file.size)}
+            {isEncrypted ? " • 🔒 Encrypted before upload" : ""}
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={isSending}
+        aria-label="Remove attachment"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+// Real-time link preview banner displayed above input
+function LinkPreviewBanner({ url, onDismiss }) {
+  if (!url) return null;
+
+  return (
+    <div className="relative mb-2 overflow-hidden rounded-2xl border border-input bg-secondary/60 p-2 pr-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <LinkPreviewCard url={url} isOwn={false} />
+        </div>
+        <button
+          type="button"
+          onClick={() => onDismiss(url)}
+          aria-label="Remove link preview"
+          title="Remove preview"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Chat input bar coordinating text, media attachments, voice recording and polls
 export function MessageInput({
   onSend,
   onTyping,
@@ -123,24 +253,30 @@ export function MessageInput({
   onClearDroppedFile,
   isEncrypted = true,
 }) {
+  // Input and attachment states
   const [text, setText] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
-  const [isSending, setIsSending] = useState(false);
-  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [fileError, setFileError] = useState("");
+
+  // Loading and mode states
+  const [isSending, setIsSending] = useState(false);
   const [gifLoading, setGifLoading] = useState(false);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [dismissedUrl, setDismissedUrl] = useState(null);
   const [isPollDialogOpen, setIsPollDialogOpen] = useState(false);
 
-  const detectedUrl = !selectedFile ? extractFirstUrl(text) : null;
-  const showLinkPreview = Boolean(detectedUrl && detectedUrl !== dismissedUrl);
-
+  // References
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Grow with the text. The CSS max-h (8 lines) stops the growth,
-  // and overflow-y-auto turns the box into a scroller after that.
+  // Derived values
+  const detectedUrl = !selectedFile ? extractFirstUrl(text) : null;
+  const showLinkPreview = Boolean(detectedUrl && detectedUrl !== dismissedUrl);
+  const hasContent = text.trim().length > 0 || selectedFile !== null;
+  const canSend = hasContent && !isSending;
+
+  // Auto-grow textarea with content
   const fit = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -148,17 +284,16 @@ export function MessageInput({
     el.style.height = `${el.scrollHeight}px`;
   }, []);
 
-  // Re-fit on every text change (also shrinks it back after sending)
   useLayoutEffect(fit, [text, fit]);
 
-  // Focus textarea when a reply is initiated
+  // Focus textarea when replying
   useEffect(() => {
     if (replyingTo) {
       textareaRef.current?.focus();
     }
   }, [replyingTo]);
 
-  // Re-fit when the box gets wider/narrower (e.g. the sidebar is dragged)
+  // Recalculate height when box width changes
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -173,80 +308,51 @@ export function MessageInput({
     return () => observer.disconnect();
   }, [fit]);
 
-  // Clean up object URL on file change or unmount
+  // Revoke object URL on change or unmount
   useEffect(() => {
     return () => {
       if (filePreview) URL.revokeObjectURL(filePreview);
     };
   }, [filePreview]);
 
-  // Shared by the file dialog and the GIF picker. Returns true if accepted.
-  const acceptFile = (file) => {
-    setFileError("");
-    if (file.size === 0) {
-      setFileError("This file is empty.");
-      toast.error("This file is empty.");
-      return false;
-    }
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      setFileError("File exceeds the 15 MiB limit.");
-      toast.error("File exceeds the 15 MiB limit.");
-      return false;
-    }
-    if (!isAllowedFile(file)) {
-      setFileError("This file type isn't supported.");
-      toast.error("This file type isn't supported.");
-      return false;
-    }
-
+  // Updates selected file state and generates object URL preview for media
+  const commitFile = (file) => {
     if (filePreview) URL.revokeObjectURL(filePreview);
     setSelectedFile(file);
     setFilePreview(
-      file.type.startsWith("image/") || file.type.startsWith("video/")
+      file.type?.startsWith("image/") || file.type?.startsWith("video/")
         ? URL.createObjectURL(file)
         : null,
     );
     return true;
   };
 
-  // Central handler for adding any file (picker, drop, paste).
-  // Validates file constraints, normalizes GIFs into silent MP4s, and manages user toasts.
+  // Normalizes incoming raw files, validates constraints, and handles GIF transcoding
   const processAndAcceptFile = async (rawFile) => {
     if (!rawFile) return false;
 
-    // 1. Fast pre-validation BEFORE expensive operations
     setFileError("");
-    if (rawFile.size === 0) {
-      const err = "This file is empty.";
-      setFileError(err);
-      toast.error(err);
-      return false;
-    }
-    if (rawFile.size > MAX_FILE_SIZE_BYTES) {
-      const err = "File exceeds the 15 MiB limit.";
-      setFileError(err);
-      toast.error(err);
-      return false;
-    }
-    if (!isAllowedFile(rawFile)) {
-      const err = "This file type isn't supported.";
-      setFileError(err);
-      toast.error(err);
+    const validationError = validateFile(rawFile);
+    if (validationError) {
+      setFileError(validationError);
+      toast.error(validationError);
       return false;
     }
 
-    // 2. GIF Pipeline: transcode any GIF into a silent H.264 MP4
     let fileToAccept = rawFile;
     if (isGifFile(rawFile)) {
       setGifLoading(true);
       const toastId = toast.loading("Converting GIF to video...");
       try {
-        const { convertGifToMp4 } = await import("@/features/chat/lib/gifConverter");
+        const { convertGifToMp4 } = await import(
+          "@/features/chat/lib/gifConverter"
+        );
         fileToAccept = await convertGifToMp4(rawFile);
         toast.dismiss(toastId);
       } catch (err) {
         console.error("GIF conversion failed:", err);
-        const errMsg = "Couldn't convert that GIF to video. Please try another file.";
+        const errMsg =
+          "Couldn't convert that GIF to video. Please try another file.";
         setFileError(errMsg);
         toast.error(errMsg, { id: toastId });
         return false;
@@ -255,10 +361,10 @@ export function MessageInput({
       }
     }
 
-    return acceptFile(fileToAccept);
+    return commitFile(fileToAccept);
   };
 
-  // Accept file dropped into the ChatWindow from above
+  // Handle files dropped into ChatWindow
   useEffect(() => {
     if (!droppedFile) return;
 
@@ -277,7 +383,7 @@ export function MessageInput({
     };
   }, [droppedFile]);
 
-  // Handle clipboard paste (Ctrl+V / Cmd+V for screenshots and files)
+  // Handle clipboard file paste (Ctrl+V)
   const handlePaste = async (e) => {
     const items = e.clipboardData?.items;
     if (!items || items.length === 0) return;
@@ -295,6 +401,7 @@ export function MessageInput({
     }
   };
 
+  // File picker selection
   const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -303,6 +410,7 @@ export function MessageInput({
     if (accepted) textareaRef.current?.focus();
   };
 
+  // Clear selected file
   const handleRemoveFile = () => {
     if (filePreview) URL.revokeObjectURL(filePreview);
     setSelectedFile(null);
@@ -311,11 +419,13 @@ export function MessageInput({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // Text change and typing notification
   const handleChange = (e) => {
     setText(e.target.value);
-    if (e.target.value) onTyping?.(); // tell the parent "the user is typing"
+    if (e.target.value) onTyping?.();
   };
 
+  // Send message submission
   const send = async () => {
     const trimmed = text.trim();
     if ((!trimmed && !selectedFile) || isSending) return;
@@ -323,7 +433,6 @@ export function MessageInput({
     setIsSending(true);
     setFileError("");
     try {
-      // onSend returns false when the message wasn't sent: keep what was typed.
       const sent = await onSend(trimmed, selectedFile);
       if (sent !== false) {
         setText("");
@@ -332,7 +441,7 @@ export function MessageInput({
       }
     } finally {
       setIsSending(false);
-      textareaRef.current?.focus(); // keep typing without clicking again
+      textareaRef.current?.focus();
     }
   };
 
@@ -341,6 +450,7 @@ export function MessageInput({
     send();
   };
 
+  // Voice note handlers
   const cancelVoice = useCallback(() => setIsVoiceRecording(false), []);
 
   const handleSendVoice = async (file) => {
@@ -357,11 +467,13 @@ export function MessageInput({
     }
   };
 
+  // GIF picker selection
   const handleGifSelect = async (gif) => {
     setGifLoading(true);
     setFileError("");
     try {
-      acceptFile(await gifToFile(gif));
+      const file = await gifToFile(gif);
+      commitFile(file);
     } catch {
       const errText = "Couldn't load that GIF. Please try another.";
       setFileError(errText);
@@ -371,18 +483,17 @@ export function MessageInput({
     }
   };
 
+  // Poll creation handler
   const handleCreatePoll = async (pollData) => {
     setIsSending(true);
     try {
-      const ok = await onSend("", null, pollData);
-      return ok;
+      return await onSend("", null, pollData);
     } finally {
       setIsSending(false);
     }
   };
 
-  // Enter sends, Shift+Enter adds a new line (like WhatsApp Web).
-  // On phones/tablets (touch) Enter always adds a new line; use the button.
+  // Keyboard navigation: Enter sends, Shift+Enter adds newline
   const handleKeyDown = (e) => {
     if (e.key === "Escape" && replyingTo) {
       e.preventDefault();
@@ -395,49 +506,21 @@ export function MessageInput({
     send();
   };
 
-  const canSend =
-    (text.trim().length > 0 || selectedFile !== null) && !isSending;
-
   return (
     <>
       <form
         onSubmit={handleSubmit}
         className="border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       >
-        {/* Replying banner (WhatsApp style preview card) */}
-        {replyingTo && (
-          <div className="relative mb-2 flex items-center justify-between overflow-hidden rounded-xl border border-border bg-secondary/80 p-2.5 pl-3.5 shadow-sm backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
-            <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary" />
-            <div className="flex items-center gap-2.5 min-w-0">
-              <Reply className="h-4 w-4 text-primary shrink-0" />
-              <div className="min-w-0 text-xs">
-                <span className="font-semibold text-primary truncate block">
-                  {replyingTo.senderName || "Message"}
-                </span>
-                <p className="truncate text-muted-foreground text-[11px]">
-                  {replyingTo.text ||
-                    (replyingTo.mediaType
-                      ? `[${replyingTo.mediaType.toUpperCase()}]`
-                      : "Attachment")}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={onCancelReply}
-              aria-label="Cancel reply"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        )}
+        {/* Reply preview banner */}
+        <ReplyBanner replyingTo={replyingTo} onCancel={onCancelReply} />
 
-        {/* File error message */}
+        {/* Validation error */}
         {fileError && (
           <div className="mb-2 text-xs text-destructive">{fileError}</div>
         )}
 
+        {/* GIF conversion indicator */}
         {gifLoading && (
           <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -445,80 +528,19 @@ export function MessageInput({
           </div>
         )}
 
-        {/* Real-time Link Preview Banner (WhatsApp style, shown above input when URL is pasted/typed) */}
+        {/* Real-time link preview */}
         {showLinkPreview && (
-          <div className="relative mb-2 overflow-hidden rounded-2xl border border-input bg-secondary/60 p-2 pr-3 animate-in fade-in slide-in-from-bottom-2 duration-200">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <LinkPreviewCard url={detectedUrl} isOwn={false} />
-              </div>
-              <button
-                type="button"
-                onClick={() => setDismissedUrl(detectedUrl)}
-                aria-label="Remove link preview"
-                title="Remove preview"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+          <LinkPreviewBanner url={detectedUrl} onDismiss={setDismissedUrl} />
         )}
 
-        {/* Selected file preview card */}
-        {selectedFile && (
-          <div className="mb-2 flex items-center justify-between rounded-2xl border border-input bg-secondary/60 p-2 pr-3">
-            <div className="flex items-center gap-3 overflow-hidden">
-              {filePreview ? (
-                selectedFile?.type.startsWith("video/") || selectedFile?.isGif ? (
-                  <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-black">
-                    <video
-                      src={filePreview}
-                      autoPlay
-                      loop
-                      muted
-                      playsInline
-                      className="h-full w-full object-cover"
-                    />
-                    {Boolean(selectedFile?.isGif) && (
-                      <span className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[9px] font-bold text-white">
-                        GIF
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <img
-                    src={filePreview}
-                    alt="Upload preview"
-                    className="h-12 w-12 shrink-0 rounded-lg object-cover"
-                  />
-                )
-              ) : (
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <File className="h-6 w-6" />
-                </div>
-              )}
-              <div className="min-w-0">
-                <p className="truncate text-xs font-semibold text-foreground">
-                  {selectedFile.name}
-                </p>
-                <p className="text-[11px] text-muted-foreground">
-                  {formatFileSize(selectedFile.size)}
-                  {isEncrypted ? " • 🔒 Encrypted before upload" : ""}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleRemoveFile}
-              aria-label="Remove attachment"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+        {/* Selected file attachment preview */}
+        <FilePreviewCard
+          file={selectedFile}
+          preview={filePreview}
+          isEncrypted={isEncrypted}
+          isSending={isSending}
+          onRemove={handleRemoveFile}
+        />
 
         {isVoiceRecording ? (
           <VoiceRecorder
@@ -528,7 +550,7 @@ export function MessageInput({
           />
         ) : (
           <div className="flex items-end gap-2 rounded-3xl border border-input bg-secondary/40 py-1 pl-2 pr-1 focus-within:ring-2 focus-within:ring-ring">
-            {/* Hidden File Input */}
+            {/* Hidden file selector */}
             <input
               type="file"
               ref={fileInputRef}
@@ -537,7 +559,7 @@ export function MessageInput({
               accept={ACCEPT_ATTRIBUTE}
             />
 
-            {/* Attachment Button */}
+            {/* File attachment button */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -549,12 +571,13 @@ export function MessageInput({
               <Paperclip className="h-4 w-4" />
             </button>
 
+            {/* Tenor GIF picker */}
             <GifPickerButton
               onSelect={handleGifSelect}
               disabled={isSending || gifLoading}
             />
 
-            {/* Poll Button */}
+            {/* In-chat poll button */}
             <button
               type="button"
               onClick={() => setIsPollDialogOpen(true)}
@@ -566,6 +589,7 @@ export function MessageInput({
               <BarChart2 className="h-4 w-4" />
             </button>
 
+            {/* Textarea input */}
             <textarea
               ref={textareaRef}
               value={text}
@@ -573,15 +597,17 @@ export function MessageInput({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               rows={1}
+              disabled={isSending}
               placeholder={
                 selectedFile ? "Add a caption… (optional)" : "Type a message…"
               }
               aria-label="Message"
               autoComplete="off"
-              className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin"
+              className="max-h-52 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto overscroll-contain bg-transparent px-2 py-2 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none scrollbar-thin disabled:opacity-60"
             />
 
-            {canSend ? (
+            {/* Send or voice record button */}
+            {hasContent || isSending ? (
               <Button
                 type="submit"
                 disabled={!canSend}
@@ -604,7 +630,7 @@ export function MessageInput({
                 disabled={isSending}
                 aria-label="Record voice note"
                 title="Record voice message"
-                className="h-10 w-10 shrink-0 flex items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-50"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground active:scale-95 disabled:opacity-50"
               >
                 <Mic className="h-5 w-5" />
               </button>
@@ -613,7 +639,7 @@ export function MessageInput({
         )}
       </form>
 
-      {/* WhatsApp-style Create Poll Dialog */}
+      {/* Poll creation dialog */}
       <CreatePollDialog
         open={isPollDialogOpen}
         onOpenChange={setIsPollDialogOpen}
