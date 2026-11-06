@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 
 const GIF_MIME = /^(image|video)\/gif$/i;
@@ -17,7 +16,12 @@ export function isGifVideo(media, kind) {
 
   // MIME check for genuine raw gif formats
   const mime = String(
-    media.fileType || media.mimeType || media.mimetype || media.contentType || media.type || "",
+    media.fileType ||
+      media.mimeType ||
+      media.mimetype ||
+      media.contentType ||
+      media.type ||
+      "",
   ).toLowerCase();
   if (GIF_MIME.test(mime)) return true;
 
@@ -36,74 +40,79 @@ export function isGifVideo(media, kind) {
   return name.endsWith(".gif.mp4");
 }
 
-// A chat "GIF" is a short silent looping MP4: first frame and a GIF badge, tap to play a few loops, tap again to replay
+// Looping GIF video player with loop counter, scroll pause/resume, and thumbnail frame reset
 export function GifVideoPlayer({
   src,
   isLoading,
   error,
-  timeLabel, // optional, shown bottom-right
-  loopCount = 3, // plays this many times, then holds the last frame
+  timeLabel,
+  loopCount = 3,
   onError,
   className,
 }) {
   const videoRef = useRef(null);
-  const wraps = useRef(0); // times the native loop wrapped back to 0:00
-  const lastTime = useRef(0);
-  const finished = useRef(false); // true once stopped on the last frame
+  const loopsPlayed = useRef(0);
+  const finished = useRef(false);
+  const wasPlayingBeforeScroll = useRef(false);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
-  const [aspect, setAspect] = useState(null); // keeps the real ratio, no letterbox
+  const [aspect, setAspect] = useState(null);
 
-  // Wire up video events and count loops
+  // Reset internal tracking refs whenever source changes
+  useEffect(() => {
+    loopsPlayed.current = 0;
+    finished.current = false;
+    wasPlayingBeforeScroll.current = false;
+    setIsPlaying(false);
+    setIsBuffering(false);
+  }, [src]);
+
+  // Wire up video events and count loops cleanly via native ended event
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-
-    let frameCallbackId = null;
 
     const handleMetadata = () => {
       if (v.videoWidth && v.videoHeight) {
         setAspect(v.videoWidth / v.videoHeight);
       }
-      // Paints the first frame as the poster (needed on iOS Safari)
-      if (v.currentTime === 0) v.currentTime = 0.001;
-    };
-
-    // Native loop does the looping; we only count wraps and turn loop off
-    // for the final pass so the clip ends and holds its last frame
-    const countWrap = (time) => {
-      if (time < lastTime.current - 0.1 && !v.seeking) {
-        wraps.current += 1;
-        if (wraps.current >= loopCount - 1) v.loop = false;
+      // Paints the first frame as the poster thumbnail
+      if (v.currentTime === 0) {
+        try {
+          v.currentTime = 0.001;
+        } catch {}
       }
-      lastTime.current = time;
-    };
-
-    const handleTimeUpdate = () => countWrap(v.currentTime);
-
-    const handleFrame = (_now, meta) => {
-      countWrap(meta.mediaTime);
-      frameCallbackId = v.requestVideoFrameCallback(handleFrame);
     };
 
     const handlePlay = () => {
       setIsPlaying(true);
-      const canTrackFrames = typeof v.requestVideoFrameCallback === "function";
-      if (canTrackFrames && frameCallbackId === null) {
-        frameCallbackId = v.requestVideoFrameCallback(handleFrame);
-      }
     };
 
     const handlePause = () => {
-      if (!v.ended) setIsPlaying(false);
+      setIsBuffering(false);
+      if (!v.ended) {
+        setIsPlaying(false);
+      }
     };
 
     const handleEnded = () => {
-      finished.current = true;
-      setIsPlaying(false);
+      loopsPlayed.current += 1;
+
+      if (loopsPlayed.current < loopCount) {
+        // Replay next loop
+        v.currentTime = 0;
+        v.play().catch(() => {});
+      } else {
+        // Finished all loops: mark finished and reset back to first frame (thumbnail)
+        finished.current = true;
+        setIsPlaying(false);
+        try {
+          v.currentTime = 0.001;
+        } catch {}
+      }
     };
 
     const handleWaiting = () => setIsBuffering(true);
@@ -112,36 +121,42 @@ export function GifVideoPlayer({
 
     v.addEventListener("loadedmetadata", handleMetadata);
     v.addEventListener("play", handlePlay);
-    v.addEventListener("timeupdate", handleTimeUpdate);
     v.addEventListener("pause", handlePause);
+    v.addEventListener("ended", handleEnded);
     v.addEventListener("waiting", handleWaiting);
     v.addEventListener("playing", handlePlaying);
-    v.addEventListener("ended", handleEnded);
     v.addEventListener("error", handleError);
 
     return () => {
       v.removeEventListener("loadedmetadata", handleMetadata);
       v.removeEventListener("play", handlePlay);
-      v.removeEventListener("timeupdate", handleTimeUpdate);
       v.removeEventListener("pause", handlePause);
+      v.removeEventListener("ended", handleEnded);
       v.removeEventListener("waiting", handleWaiting);
       v.removeEventListener("playing", handlePlaying);
-      v.removeEventListener("ended", handleEnded);
       v.removeEventListener("error", handleError);
-      if (frameCallbackId !== null && v.cancelVideoFrameCallback) {
-        v.cancelVideoFrameCallback(frameCallbackId);
-      }
     };
   }, [src, loopCount]);
 
-  // Pause when scrolled out of view so long chats don't keep decoding
+  // Pause when scrolled out of view and resume when scrolled back into view
   useEffect(() => {
     const v = videoRef.current;
     if (!v || typeof IntersectionObserver === "undefined") return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry.isIntersecting && !v.paused) v.pause();
+        if (!entry.isIntersecting) {
+          if (!v.paused) {
+            wasPlayingBeforeScroll.current = true;
+            v.pause();
+          }
+        } else {
+          // Scrolled back into view: resume only if it was playing and has passes remaining
+          if (wasPlayingBeforeScroll.current && !finished.current) {
+            wasPlayingBeforeScroll.current = false;
+            v.play().catch(() => {});
+          }
+        }
       },
       { threshold: 0.2 },
     );
@@ -150,26 +165,24 @@ export function GifVideoPlayer({
     return () => observer.disconnect();
   }, [src]);
 
+  // Play / Pause toggle
   const toggle = () => {
     const v = videoRef.current;
     if (!v) return;
 
     if (!v.paused) {
+      wasPlayingBeforeScroll.current = false;
       v.pause();
       return;
     }
 
     if (finished.current || v.ended) {
-      // Replay from the start with a fresh loop count
+      // Replay from start with a fresh loop count
       finished.current = false;
-      wraps.current = 0;
-      lastTime.current = 0;
-      v.loop = loopCount > 1;
+      loopsPlayed.current = 0;
       v.currentTime = 0;
-    } else {
-      // First play or resume: loop only while passes remain
-      v.loop = wraps.current < loopCount - 1;
     }
+
     v.play().catch(() => {});
   };
 
@@ -215,13 +228,13 @@ export function GifVideoPlayer({
         src={src}
         muted
         playsInline
-        preload="auto" // GIFs are tiny, so load them to show the first frame
+        preload="auto"
         disablePictureInPicture
         controlsList="nodownload nofullscreen noremoteplayback"
         className="h-full w-full object-cover"
       />
 
-      {/* GIF badge, only while stopped */}
+      {/* GIF badge shown when stopped */}
       {!isPlaying && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/55 text-[11px] font-bold tracking-wide text-white/90 backdrop-blur-sm">
@@ -230,12 +243,14 @@ export function GifVideoPlayer({
         </div>
       )}
 
+      {/* Buffering spinner */}
       {isPlaying && isBuffering && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-white/80" />
         </div>
       )}
 
+      {/* Time label badge */}
       {timeLabel && (
         <span className="pointer-events-none absolute bottom-1.5 right-2 rounded bg-black/40 px-1.5 text-[10px] font-medium text-white/90">
           {timeLabel}
