@@ -2,45 +2,69 @@ import React, { useEffect, useRef, useState } from "react";
 import { Trash2, Send, Play, Pause, Loader2, Mic } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { useVoiceRecorder, MAX_SECONDS } from "@/features/chat/hooks/useVoiceRecorder";
+import {
+  useVoiceRecorder,
+  MAX_SECONDS,
+} from "@/features/chat/hooks/useVoiceRecorder";
 
-const fmt = (s = 0) => {
+const ICON_BTN =
+  "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition active:scale-95 disabled:opacity-40";
+const DISCARD_BTN = cn(
+  ICON_BTN,
+  "hover:bg-destructive/10 hover:text-destructive",
+);
+const NEUTRAL_BTN = cn(ICON_BTN, "hover:bg-muted hover:text-foreground");
+
+// Seconds as m:ss
+const formatTime = (s = 0) => {
   const t = Math.max(0, Math.floor(s));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 };
 
-const toFile = ({ blob, duration, ext, mimeType }) =>
+// Wraps a recording in a File; the duration is encoded in the name
+const toVoiceFile = ({ blob, duration, ext, mimeType }) =>
   new File([blob], `voice-message-${Date.now()}_dur${duration}.${ext}`, {
     type: mimeType,
     lastModified: Date.now(),
   });
 
+// Spinner while sending, plane icon otherwise
+function SendIcon({ isSending }) {
+  return isSending ? (
+    <Loader2 className="h-4 w-4 animate-spin" />
+  ) : (
+    <Send className="h-4 w-4" />
+  );
+}
+
+// Voice message bar: records with a live waveform, then previews before sending
 export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
+  const audioRef = useRef(null);
+  const busyRef = useRef(false);
+  const onCancelRef = useRef(onCancel); // latest onCancel, so the start effect runs only once
+  onCancelRef.current = onCancel;
+
   const [preview, setPreview] = useState(null); // { url, blob, duration, ... }
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  const audioRef = useRef(null);
-  const busyRef = useRef(false);
 
   const showPreview = (snap) =>
     setPreview({ ...snap, url: URL.createObjectURL(snap.blob) });
 
-  // When the limit is hit the hook fully STOPS the recorder (mic released) and
-  // calls this with the final recording, so we land in preview mode. Resume is
-  // disabled there because rec.isRecording is false.
+  // At the limit the hook stops the recorder (mic released) and hands over the final recording
   const rec = useVoiceRecorder({
     maxSeconds: MAX_SECONDS,
     onMaxReached: (snap) => {
-      toast.info(`Maximum length of ${fmt(MAX_SECONDS)} reached.`);
+      toast.info(`Maximum length of ${formatTime(MAX_SECONDS)} reached.`);
       if (snap) showPreview(snap);
       else onCancelRef.current?.();
     },
   });
 
-  // Keep latest onCancel in a ref → the start effect runs ONCE (fixes the restart bug)
-  const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
+  const atLimit = rec.seconds >= rec.maxSeconds;
+  const nearLimit = rec.seconds >= rec.maxSeconds - 30;
 
+  // Start recording on mount
   useEffect(() => {
     rec.start().catch((err) => {
       console.error("Recorder start failed:", err);
@@ -56,9 +80,10 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Free the preview URL when it changes or the bar unmounts
   useEffect(() => () => preview && URL.revokeObjectURL(preview.url), [preview]);
 
-  // Stop completely (releases the mic). Used by "send now".
+  // Stops fully (releases the mic); null if the recording was empty
   const finish = async () => {
     if (busyRef.current) return null;
     busyRef.current = true;
@@ -71,16 +96,15 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
     return result;
   };
 
-  const sendNow = async () => {
-    const r = await finish();
-    if (!r) return;
-    showPreview(r);
-    onSendVoice?.(toFile(r));
+  const handleSendNow = async () => {
+    const result = await finish();
+    if (!result) return;
+    showPreview(result);
+    onSendVoice?.(toVoiceFile(result));
   };
 
-  // Pause (mic stays open) and show the preview so the user can listen,
-  // then Resume, Discard or Send.
-  const review = async () => {
+  // Pauses (mic stays open) and shows the preview to listen, resume, discard or send
+  const handleReview = async () => {
     if (busyRef.current) return;
     busyRef.current = true;
     try {
@@ -96,38 +120,40 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
     }
   };
 
-  // Go back to recording: continues the SAME recording after the paused part.
-  const resume = () => {
+  // Continues the same recording after the paused part
+  const handleResume = () => {
     audioRef.current?.pause();
     setPlaying(false);
     setTime(0);
     if (rec.resume()) {
-      setPreview(null); // effect cleanup revokes the old preview URL
+      setPreview(null); // the effect cleanup revokes the old URL
     } else {
       toast.error(
-        rec.seconds >= rec.maxSeconds
-          ? `Maximum length of ${fmt(rec.maxSeconds)} reached.`
+        atLimit
+          ? `Maximum length of ${formatTime(rec.maxSeconds)} reached.`
           : "Couldn't resume recording.",
       );
     }
   };
 
-  const discard = () => {
+  const handleDiscard = () => {
     rec.cancel();
     onCancelRef.current?.();
   };
 
-  const togglePlay = () => {
-    const a = audioRef.current;
-    if (!a) return;
-    playing ? a.pause() : a.play().catch(() => {});
+  const handleSendPreview = () => onSendVoice?.(toVoiceFile(preview));
+
+  const handleTogglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) audio.pause();
+    else audio.play().catch(() => {});
   };
 
-  const atLimit = rec.seconds >= rec.maxSeconds;
-  const nearLimit = rec.seconds >= rec.maxSeconds - 30;
-
-  const iconBtn =
-    "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition active:scale-95 disabled:opacity-40";
+  const handleEnded = () => {
+    setPlaying(false);
+    setTime(0);
+  };
 
   return (
     <div className="flex w-full items-center justify-between gap-2 rounded-3xl border border-primary/20 bg-secondary/80 px-3 py-1.5 shadow-sm">
@@ -143,20 +169,20 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
                 "font-mono text-xs font-semibold",
                 nearLimit && "text-red-500",
               )}
-              title={`Maximum ${fmt(rec.maxSeconds)}`}
+              title={`Maximum ${formatTime(rec.maxSeconds)}`}
             >
-              {fmt(rec.seconds)}
+              {formatTime(rec.seconds)}
             </span>
           </div>
 
           <div className="flex h-7 flex-1 items-center justify-center gap-0.75 overflow-hidden px-2">
-            {rec.levels.map((l, i) => (
+            {rec.levels.map((level, i) => (
               <div
                 key={i}
-                style={{ height: `${Math.max(14, l * 100)}%` }}
+                style={{ height: `${Math.max(14, level * 100)}%` }}
                 className={cn(
                   "w-1 rounded-full",
-                  l > 0.3 ? "bg-primary" : "bg-primary/40",
+                  level > 0.3 ? "bg-primary" : "bg-primary/40",
                 )}
               />
             ))}
@@ -165,40 +191,33 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
           <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
-              onClick={discard}
+              onClick={handleDiscard}
               disabled={isSending}
               aria-label="Discard recording"
-              className={cn(
-                iconBtn,
-                "hover:bg-destructive/10 hover:text-destructive",
-              )}
+              className={DISCARD_BTN}
             >
               <Trash2 className="h-4 w-4" />
             </button>
             <button
               type="button"
-              onClick={review}
+              onClick={handleReview}
               disabled={
                 isSending || !rec.isRecording || rec.isPaused || rec.seconds < 1
               }
               aria-label="Pause and review"
               title="Pause and review"
-              className={cn(iconBtn, "hover:bg-muted hover:text-foreground")}
+              className={NEUTRAL_BTN}
             >
               <Pause className="h-4 w-4 fill-current" />
             </button>
             <button
               type="button"
-              onClick={sendNow}
+              onClick={handleSendNow}
               disabled={isSending || !rec.isRecording || rec.isPaused}
               aria-label="Send voice message"
               className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition hover:brightness-110 active:scale-95 disabled:opacity-50"
             >
-              {isSending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4" />
-              )}
+              <SendIcon isSending={isSending} />
             </button>
           </div>
         </>
@@ -210,14 +229,11 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
             onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
-            onEnded={() => {
-              setPlaying(false);
-              setTime(0);
-            }}
+            onEnded={handleEnded}
           />
           <button
             type="button"
-            onClick={togglePlay}
+            onClick={handleTogglePlay}
             disabled={isSending}
             aria-label={playing ? "Pause preview" : "Play preview"}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
@@ -239,52 +255,45 @@ export function VoiceRecorder({ onSendVoice, onCancel, isSending = false }) {
               />
             </div>
             <div className="mt-0.5 flex justify-between font-mono text-[10px] text-muted-foreground">
-              <span>{fmt(time)}</span>
-              <span>{fmt(preview.duration)}</span>
+              <span>{formatTime(time)}</span>
+              <span>{formatTime(preview.duration)}</span>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={discard}
+            onClick={handleDiscard}
             disabled={isSending}
             aria-label="Discard recording"
-            className={cn(
-              iconBtn,
-              "hover:bg-destructive/10 hover:text-destructive",
-            )}
+            className={DISCARD_BTN}
           >
             <Trash2 className="h-4 w-4" />
           </button>
 
-          {/* Resume: only while the recorder is still open (paused) and below the limit */}
+          {/* Resume only works while the recorder is still open and under the limit */}
           <button
             type="button"
-            onClick={resume}
+            onClick={handleResume}
             disabled={isSending || !rec.isRecording || atLimit}
             aria-label="Resume recording"
             title={
               atLimit
-                ? `Maximum length of ${fmt(rec.maxSeconds)} reached`
+                ? `Maximum length of ${formatTime(rec.maxSeconds)} reached`
                 : "Resume recording"
             }
-            className={cn(iconBtn, "hover:bg-muted hover:text-foreground")}
+            className={NEUTRAL_BTN}
           >
             <Mic className="h-4 w-4" />
           </button>
 
           <button
             type="button"
-            onClick={() => onSendVoice?.(toFile(preview))}
+            onClick={handleSendPreview}
             disabled={isSending}
             aria-label="Send voice message"
             className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md disabled:opacity-50"
           >
-            {isSending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="h-4 w-4" />
-            )}
+            <SendIcon isSending={isSending} />
           </button>
         </>
       )}

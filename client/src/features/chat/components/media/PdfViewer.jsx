@@ -22,25 +22,10 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
+
 import { formatFileSize } from "@/features/e2ee/lib/media";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-
-/**
- * Full-screen PDF viewer: continuous scroll, like Adobe / Chrome's viewer.
- *
- * How it stays smooth
- * ───────────────────
- * 1. EVERY page gets a correctly-sized white box up front, so the scroll bar
- *    is the real length of the document and nothing ever jumps.
- * 2. Only pages within ~2 screens of the viewport are painted (and painted
- *    pages stay painted while you scroll back), so scrolling up or down never
- *    reloads a page. Far-away pages release their memory.
- * 3. Painting happens off-screen and is swapped in in one step, so a page never
- *    goes blank while it is redrawn (zoom, resize).
- * 4. A small queue draws at most 2 pages at a time, nearest page first, so
- *    scrolling stays at full frame rate.
- */
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
@@ -49,9 +34,12 @@ const GAP = 12; // space between pages (px)
 const MAX_DPR = 2; // 3x phone screens would use a lot of memory for little gain
 const MAX_CANVAS_PIXELS = 16_000_000; // stays under the iOS Safari canvas limit
 
-/* ------------------------------------------------------------------ */
-/* Render queue: nearest-to-the-reader page first, 2 at a time         */
-/* ------------------------------------------------------------------ */
+const CTRL_BTN =
+  "flex h-9 w-9 items-center justify-center text-white/80 transition hover:bg-white/10 active:bg-white/20 disabled:opacity-25 disabled:cursor-not-allowed";
+const HEADER_BTN =
+  "flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white";
+
+// Render queue: draws the page nearest the reader first, 2 at a time, so scrolling stays smooth
 function createScheduler(getCenterPage, concurrency = 2) {
   const queue = [];
   let running = 0;
@@ -84,9 +72,7 @@ function createScheduler(getCenterPage, concurrency = 2) {
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* One page                                                            */
-/* ------------------------------------------------------------------ */
+// One page: a fixed-size white box, painted off-screen and swapped in only while near the viewport
 const PdfPage = memo(function PdfPage({
   pdfDoc,
   pageNumber,
@@ -203,9 +189,7 @@ const PdfPage = memo(function PdfPage({
   );
 });
 
-/* ------------------------------------------------------------------ */
-/* Viewer                                                              */
-/* ------------------------------------------------------------------ */
+// Full-screen PDF viewer with continuous scroll; every page has its final size up front so the scrollbar never jumps
 export function PdfViewer({
   blobUrl,
   fileName,
@@ -223,34 +207,101 @@ export function PdfViewer({
   const [pageSizes, setPageSizes] = useState([]); // [{ w, h }] at scale 1
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [zoom, setZoom] = useState(1);
   const [containerWidth, setContainerWidth] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [activePages, setActivePages] = useState(() => new Set());
+  const [pageDraft, setPageDraft] = useState(null); // null = show currentPage
 
   const numPages = pageSizes.length;
+  const ready = Boolean(pdfDoc) && numPages > 0;
+  const measured = containerWidth > 0;
+  const padX = containerWidth < 640 ? 12 : 24;
 
-  const registerPage = useCallback((pageNumber, el) => {
-    pageEls.current[pageNumber - 1] = el;
-  }, []);
+  // One scale for all pages, fitted to the width
+  const maxPageWidth = useMemo(
+    () => pageSizes.reduce((m, s) => Math.max(m, s.w), 1),
+    [pageSizes],
+  );
+  const fitScale =
+    containerWidth > 0
+      ? Math.max(containerWidth - padX * 2, 160) / maxPageWidth
+      : 0;
+  const cssScale = fitScale * zoom;
+
+  const layout = useMemo(() => {
+    const tops = [];
+    const sizes = [];
+    let y = PAD_Y;
+    pageSizes.forEach((s) => {
+      const w = Math.round(s.w * cssScale);
+      const h = Math.round(s.h * cssScale);
+      sizes.push({ w, h });
+      tops.push(y);
+      y += h + GAP;
+    });
+    return { tops, sizes };
+  }, [pageSizes, cssScale]);
 
   const scheduler = useMemo(
     () => createScheduler(() => centerPage.current),
     [],
   );
 
-  // ── Close on Escape ────────────────────────────────────────────────────
+  const registerPage = useCallback((pageNumber, el) => {
+    pageEls.current[pageNumber - 1] = el;
+  }, []);
+
+  // Current page = the page under the middle of the screen
+  const updateCurrentPage = useCallback(() => {
+    scrollFrame.current = 0;
+    const el = scrollRef.current;
+    const { tops } = layout;
+    if (!el || !tops.length) return;
+
+    const y = el.scrollTop + el.clientHeight / 2;
+    let lo = 0;
+    let hi = tops.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (tops[mid] <= y) lo = mid;
+      else hi = mid - 1;
+    }
+    centerPage.current = lo + 1;
+    setCurrentPage(lo + 1);
+  }, [layout]);
+
+  const handleScroll = useCallback(() => {
+    if (scrollFrame.current) return;
+    scrollFrame.current = requestAnimationFrame(updateCurrentPage);
+  }, [updateCurrentPage]);
+
+  const goToPage = useCallback(
+    (page, smooth = true) => {
+      const el = scrollRef.current;
+      const top = layout.tops[page - 1];
+      if (!el || top === undefined) return;
+      centerPage.current = page;
+      setCurrentPage(page);
+      el.scrollTo({
+        top: Math.max(top - PAD_Y, 0),
+        behavior: smooth ? "smooth" : "auto",
+      });
+    },
+    [layout],
+  );
+
+  // Escape closes the viewer
   useEffect(() => {
-    const onKey = (e) => {
+    const handleKeyDown = (e) => {
       if (e.key === "Escape" && !(e.target instanceof HTMLInputElement))
         onClose?.();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  // ── Load the PDF, then measure every page so the layout is final ───────
+  // Load the PDF, then measure every page so the layout is final
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -307,9 +358,7 @@ export function PdfViewer({
     };
   }, [blobUrl]);
 
-  const ready = Boolean(pdfDoc) && numPages > 0;
-
-  // ── Track the scroll area's width (window resize, sidebar, rotation) ───
+  // Track the scroll area's width (window resize, sidebar, rotation)
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!ready || !el) return;
@@ -327,34 +376,7 @@ export function PdfViewer({
     };
   }, [ready]);
 
-  // ── Layout maths: one scale for all pages, fitted to the width ─────────
-  const measured = containerWidth > 0;
-  const padX = containerWidth < 640 ? 12 : 24;
-  const maxPageWidth = useMemo(
-    () => pageSizes.reduce((m, s) => Math.max(m, s.w), 1),
-    [pageSizes],
-  );
-  const fitScale =
-    containerWidth > 0
-      ? Math.max(containerWidth - padX * 2, 160) / maxPageWidth
-      : 0;
-  const cssScale = fitScale * zoom;
-
-  const layout = useMemo(() => {
-    const tops = [];
-    const sizes = [];
-    let y = PAD_Y;
-    pageSizes.forEach((s) => {
-      const w = Math.round(s.w * cssScale);
-      const h = Math.round(s.h * cssScale);
-      sizes.push({ w, h });
-      tops.push(y);
-      y += h + GAP;
-    });
-    return { tops, sizes };
-  }, [pageSizes, cssScale]);
-
-  // ── Keep the same spot on screen when zoom / width changes ─────────────
+  // Keep the same spot on screen when zoom or width changes
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || !cssScale) return;
@@ -368,7 +390,7 @@ export function PdfViewer({
       (el.scrollLeft + el.clientWidth / 2) * ratio - el.clientWidth / 2;
   }, [cssScale]);
 
-  // ── Which pages are near the screen? (paint those, free the rest) ──────
+  // Mark pages within ~2 screens as active (paint them, free the rest)
   useEffect(() => {
     const root = scrollRef.current;
     if (!ready || !root || !measured) return;
@@ -392,37 +414,14 @@ export function PdfViewer({
           return changed ? next : prev;
         });
       },
-      { root, rootMargin: "200% 0px 200% 0px" }, // ~2 screens above and below
+      { root, rootMargin: "200% 0px 200% 0px" },
     );
 
     pageEls.current.forEach((el) => el && observer.observe(el));
     return () => observer.disconnect();
   }, [ready, measured, numPages]);
 
-  // ── Current page number (page under the middle of the screen) ──────────
-  const updateCurrentPage = useCallback(() => {
-    scrollFrame.current = 0;
-    const el = scrollRef.current;
-    const { tops } = layout;
-    if (!el || !tops.length) return;
-
-    const y = el.scrollTop + el.clientHeight / 2;
-    let lo = 0;
-    let hi = tops.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (tops[mid] <= y) lo = mid;
-      else hi = mid - 1;
-    }
-    centerPage.current = lo + 1;
-    setCurrentPage(lo + 1);
-  }, [layout]);
-
-  const handleScroll = useCallback(() => {
-    if (scrollFrame.current) return;
-    scrollFrame.current = requestAnimationFrame(updateCurrentPage);
-  }, [updateCurrentPage]);
-
+  // Keep the page number in sync with scrolling
   useEffect(() => {
     updateCurrentPage();
     return () => {
@@ -431,11 +430,11 @@ export function PdfViewer({
     };
   }, [updateCurrentPage]);
 
-  // ── Ctrl + wheel / trackpad pinch = zoom (like Adobe) ──────────────────
+  // Ctrl + wheel or trackpad pinch zooms, like Adobe
   useEffect(() => {
     const el = scrollRef.current;
     if (!ready || !el) return;
-    const onWheel = (e) => {
+    const handleWheel = (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
       setZoom((z) =>
@@ -445,33 +444,14 @@ export function PdfViewer({
         ),
       );
     };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
   }, [ready]);
 
   // Focus the scroll area so PageUp / PageDown / Space / Home / End just work
   useEffect(() => {
     if (ready) scrollRef.current?.focus({ preventScroll: true });
   }, [ready]);
-
-  // ── Navigation ─────────────────────────────────────────────────────────
-  const goToPage = useCallback(
-    (page, smooth = true) => {
-      const el = scrollRef.current;
-      const top = layout.tops[page - 1];
-      if (!el || top === undefined) return;
-      centerPage.current = page;
-      setCurrentPage(page);
-      el.scrollTo({
-        top: Math.max(top - PAD_Y, 0),
-        behavior: smooth ? "smooth" : "auto",
-      });
-    },
-    [layout],
-  );
-
-  // Page-number box: shows the current page; becomes an input while you type
-  const [pageDraft, setPageDraft] = useState(null); // null = show currentPage
 
   const commitPageDraft = () => {
     const n = parseInt(pageDraft, 10);
@@ -481,7 +461,7 @@ export function PdfViewer({
     scrollRef.current?.focus({ preventScroll: true }); // keys scroll the PDF again
   };
 
-  const onPageKeyDown = (e) => {
+  const handlePageKeyDown = (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       commitPageDraft();
@@ -499,16 +479,9 @@ export function PdfViewer({
   const zoomOut = () =>
     setZoom((z) => Math.max(+(z - 0.25).toFixed(2), MIN_ZOOM));
 
-  // ── Shared button style for control pill items ─────────────────────────
-  const ctrlBtn =
-    "flex h-9 w-9 items-center justify-center text-white/80 transition " +
-    "hover:bg-white/10 active:bg-white/20 " +
-    "disabled:opacity-25 disabled:cursor-not-allowed";
-
-  // ── Render ─────────────────────────────────────────────────────────────
   return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col bg-neutral-950 text-white">
-      {/* ══ HEADER ════════════════════════════════════════════════════════ */}
+      {/* Header: file info and actions */}
       <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-neutral-900 px-3 sm:px-5">
         <div className="flex min-w-0 items-center gap-2.5 overflow-hidden rounded-xl border border-white/10 bg-white/5 px-3 py-2">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/10">
@@ -531,7 +504,7 @@ export function PdfViewer({
             target="_blank"
             rel="noopener noreferrer"
             title="Open in new tab"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+            className={HEADER_BTN}
           >
             <ExternalLink className="h-4 w-4" />
           </a>
@@ -540,7 +513,7 @@ export function PdfViewer({
             href={blobUrl}
             download={fileName || "document.pdf"}
             title="Save as…"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+            className={HEADER_BTN}
           >
             <Download className="h-4 w-4" />
           </a>
@@ -549,14 +522,14 @@ export function PdfViewer({
             type="button"
             onClick={onClose}
             title="Close (Esc)"
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-white/70 transition hover:bg-white/10 hover:text-white"
+            className={HEADER_BTN}
           >
             <X className="h-4 w-4" />
           </button>
         </div>
       </header>
 
-      {/* ══ CONTENT AREA ═════════════════════════════════════════════════ */}
+      {/* Content: loading, error or the pages */}
       {loading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-white/70">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -577,9 +550,9 @@ export function PdfViewer({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-4 lg:p-6 lg:pb-6">
-          {/* Floating panel: same gap on all four sides, on every screen size */}
+          {/* Floating panel with equal gaps on every screen size */}
           <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-neutral-800 shadow-2xl">
-            {/* ── Control pill ── */}
+            {/* Page and zoom controls */}
             <div className="flex shrink-0 items-center justify-center border-b border-white/10 bg-neutral-900/70 px-4 py-2.5">
               <div className="flex select-none items-center overflow-hidden rounded-full border border-white/10 bg-neutral-900/90 shadow-lg">
                 <div className="flex h-9 min-w-10 items-center justify-center border-r border-white/10 px-1">
@@ -596,7 +569,7 @@ export function PdfViewer({
                         e.target.value.replace(/\D/g, "").slice(0, 5),
                       )
                     }
-                    onKeyDown={onPageKeyDown}
+                    onKeyDown={handlePageKeyDown}
                     onBlur={() => setPageDraft(null)}
                     style={{
                       width: `${Math.max(2, String(numPages).length) + 1}ch`,
@@ -614,7 +587,7 @@ export function PdfViewer({
                   onClick={goToPrev}
                   disabled={currentPage <= 1}
                   aria-label="Previous page"
-                  className={`${ctrlBtn} border-r border-white/10`}
+                  className={`${CTRL_BTN} border-r border-white/10`}
                 >
                   <ChevronUp className="h-4 w-4" />
                 </button>
@@ -624,7 +597,7 @@ export function PdfViewer({
                   onClick={goToNext}
                   disabled={currentPage >= numPages}
                   aria-label="Next page"
-                  className={`${ctrlBtn} border-r border-white/10`}
+                  className={`${CTRL_BTN} border-r border-white/10`}
                 >
                   <ChevronDown className="h-4 w-4" />
                 </button>
@@ -635,7 +608,7 @@ export function PdfViewer({
                   disabled={zoom >= MAX_ZOOM}
                   title={`Zoom in (${Math.round(zoom * 100)}%)`}
                   aria-label="Zoom in"
-                  className={`${ctrlBtn} border-r border-white/10`}
+                  className={`${CTRL_BTN} border-r border-white/10`}
                 >
                   <ZoomIn className="h-4 w-4" />
                 </button>
@@ -646,14 +619,14 @@ export function PdfViewer({
                   disabled={zoom <= MIN_ZOOM}
                   title={`Zoom out (${Math.round(zoom * 100)}%)`}
                   aria-label="Zoom out"
-                  className={ctrlBtn}
+                  className={CTRL_BTN}
                 >
                   <ZoomOut className="h-4 w-4" />
                 </button>
               </div>
             </div>
 
-            {/* ── All pages, one continuous scroll ── */}
+            {/* All pages in one continuous scroll */}
             <div
               ref={scrollRef}
               onScroll={handleScroll}
