@@ -1,93 +1,67 @@
 import React from "react";
+import { Check, Users } from "lucide-react";
+
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
-import { Check, Users } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  aggregatePollVotes,
+  votePercentage,
+} from "@/features/chat/lib/pollUtils";
 
+// Time of day, e.g. 09:36 AM
 function formatVoteTime(timestamp) {
   if (!timestamp) return "";
-  const d = new Date(timestamp);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-export function PollVotesDialog({
-  open,
-  onOpenChange,
-  poll,
-  currentUserId,
-}) {
+// Poll results: per-option percentage, bar and who voted when
+export function PollVotesDialog({ open, onOpenChange, poll, currentUserId }) {
   if (!poll) return null;
 
-  const { question, options = [], votes = [] } = poll;
+  const { question, options = [], allowMultipleAnswers } = poll;
+  const { votersByOption, totalVoters } = aggregatePollVotes(
+    poll,
+    currentUserId,
+  );
 
-  // Aggregate votes per option
-  const optionVotersMap = new Map();
-  options.forEach((opt) => optionVotersMap.set(opt.id, []));
-
-  let totalVotersCount = 0;
-  const uniqueVoterIds = new Set();
-
-  votes.forEach((v) => {
-    const voter = v.userId;
-    const voterId = String(voter?._id || voter?.id || voter);
-    const selectedIds = v.selectedOptionIds || [];
-
-    if (selectedIds.length > 0) {
-      uniqueVoterIds.add(voterId);
-    }
-
-    selectedIds.forEach((optId) => {
-      if (optionVotersMap.has(optId)) {
-        optionVotersMap.get(optId).push({
-          id: voterId,
-          name: voter?.name || "Someone",
-          avatarUrl: voter?.avatarUrl || voter?.avatar || null,
-          updatedAt: v.updatedAt,
-          isMe: voterId === String(currentUserId),
-        });
-      }
-    });
-  });
-
-  totalVotersCount = uniqueVoterIds.size;
+  const handleClose = () => onOpenChange(false);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <div className="space-y-4">
-        {/* Header */}
         <div className="border-b border-border pb-3">
-          <div className="flex items-center gap-2 text-primary mb-1">
+          <div className="mb-1 flex items-center gap-2 text-primary">
             <Users className="h-4 w-4" />
             <span className="text-xs font-semibold uppercase tracking-wider">
               Poll Results
             </span>
           </div>
-          <h2 className="text-base font-semibold text-foreground leading-snug">
+          <h2 className="text-base font-semibold leading-snug text-foreground">
             {question}
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {totalVotersCount} {totalVotersCount === 1 ? "person voted" : "people voted"}
-            {poll.allowMultipleAnswers ? " • Multiple answers allowed" : " • Single choice"}
+            {totalVoters} {totalVoters === 1 ? "person voted" : "people voted"}
+            {allowMultipleAnswers
+              ? " • Multiple answers allowed"
+              : " • Single choice"}
           </p>
         </div>
 
-        {/* Options Breakdown */}
         <div className="max-h-80 space-y-4 overflow-y-auto pr-1 scrollbar-thin">
           {options.map((opt) => {
-            const voters = optionVotersMap.get(opt.id) || [];
+            const voters = votersByOption.get(opt.id) || [];
             const voteCount = voters.length;
-            const percentage =
-              totalVotersCount > 0
-                ? Math.round((voteCount / totalVotersCount) * 100)
-                : 0;
+            const percentage = votePercentage(voteCount, totalVoters);
 
             return (
               <div
                 key={opt.id}
-                className="rounded-lg border border-border bg-card p-3 space-y-2.5 shadow-xs"
+                className="space-y-2.5 rounded-lg border border-border bg-card p-3 shadow-xs"
               >
-                {/* Option Header */}
                 <div className="flex items-center justify-between text-sm font-medium">
                   <span className="text-foreground">{opt.text}</span>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -100,7 +74,6 @@ export function PollVotesDialog({
                   </div>
                 </div>
 
-                {/* Mini progress bar */}
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full bg-primary transition-all duration-300"
@@ -108,9 +81,8 @@ export function PollVotesDialog({
                   />
                 </div>
 
-                {/* Voters List */}
                 {voters.length > 0 ? (
-                  <div className="pt-1 divide-y divide-border/50">
+                  <div className="divide-y divide-border/50 pt-1">
                     {voters.map((voter) => (
                       <div
                         key={voter.id}
@@ -139,7 +111,7 @@ export function PollVotesDialog({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] italic text-muted-foreground pt-0.5">
+                  <p className="pt-0.5 text-[11px] italic text-muted-foreground">
                     No votes yet
                   </p>
                 )}
@@ -148,9 +120,8 @@ export function PollVotesDialog({
           })}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end pt-2 border-t border-border">
-          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+        <div className="flex justify-end border-t border-border pt-2">
+          <Button variant="outline" size="sm" onClick={handleClose}>
             Close
           </Button>
         </div>

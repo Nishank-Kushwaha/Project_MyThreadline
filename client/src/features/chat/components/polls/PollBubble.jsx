@@ -1,9 +1,33 @@
 import React, { useState } from "react";
-import { Check, Circle, CheckSquare, Square, ChevronRight } from "lucide-react";
-import { Avatar } from "@/components/ui/avatar";
-import { PollVotesDialog } from "./PollVotesDialog";
-import { cn } from "@/lib/utils";
+import { Circle, CheckSquare, Square, ChevronRight } from "lucide-react";
 
+import { Avatar } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
+import { PollVotesDialog } from "./PollVotesDialog";
+import {
+  aggregatePollVotes,
+  votePercentage,
+} from "@/features/chat/lib/pollUtils";
+
+// Radio or checkbox look, depending on whether multiple answers are allowed
+function OptionIndicator({ multiple, selected }) {
+  if (multiple) {
+    return selected ? (
+      <CheckSquare className="h-4 w-4 fill-primary/10 text-primary" />
+    ) : (
+      <Square className="h-4 w-4" />
+    );
+  }
+  return selected ? (
+    <div className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-primary bg-primary text-primary-foreground">
+      <div className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />
+    </div>
+  ) : (
+    <Circle className="h-4 w-4" />
+  );
+}
+
+// Poll inside a chat bubble: tap an option to vote, "View votes" for details
 export function PollBubble({
   poll,
   messageId,
@@ -15,76 +39,37 @@ export function PollBubble({
 
   if (!poll || !poll.question) return null;
 
-  const {
-    question = "",
-    options = [],
-    allowMultipleAnswers = false,
-    votes = [],
-  } = poll;
+  const { question = "", options = [], allowMultipleAnswers = false } = poll;
+  const { votersByOption, mySelectedOptionIds, totalVoters } =
+    aggregatePollVotes(poll, currentUserId);
 
-  // Aggregate votes per option and find current user's votes
-  const optionVotersMap = new Map();
-  options.forEach((opt) => optionVotersMap.set(opt.id, []));
-
-  const mySelectedOptionIds = new Set();
-  const uniqueVoterIds = new Set();
-
-  votes.forEach((v) => {
-    const voter = v.userId;
-    const voterId = String(voter?._id || voter?.id || voter);
-    const selectedIds = v.selectedOptionIds || [];
-
-    if (selectedIds.length > 0) {
-      uniqueVoterIds.add(voterId);
-    }
-
-    const isMe = voterId === String(currentUserId);
-    if (isMe) {
-      selectedIds.forEach((id) => mySelectedOptionIds.add(id));
-    }
-
-    selectedIds.forEach((optId) => {
-      if (optionVotersMap.has(optId)) {
-        optionVotersMap.get(optId).push({
-          id: voterId,
-          name: voter?.name || "Someone",
-          avatarUrl: voter?.avatarUrl || voter?.avatar || null,
-        });
-      }
-    });
-  });
-
-  const totalVotersCount = uniqueVoterIds.size;
-
+  // Multi-choice toggles the option; single-choice switches to it (or clears if already picked)
   const handleOptionClick = (optionId) => {
     if (!onVote) return;
 
-    let newSelected;
+    let next;
     if (allowMultipleAnswers) {
-      // Toggle selection in multi-choice
-      newSelected = new Set(mySelectedOptionIds);
-      if (newSelected.has(optionId)) {
-        newSelected.delete(optionId);
-      } else {
-        newSelected.add(optionId);
-      }
+      next = new Set(mySelectedOptionIds);
+      if (next.has(optionId)) next.delete(optionId);
+      else next.add(optionId);
     } else {
-      // Single choice: toggle off if clicking selected, else pick only this option
-      if (mySelectedOptionIds.has(optionId)) {
-        newSelected = new Set();
-      } else {
-        newSelected = new Set([optionId]);
-      }
+      next = mySelectedOptionIds.has(optionId)
+        ? new Set()
+        : new Set([optionId]);
     }
 
-    onVote(Array.from(newSelected));
+    onVote(Array.from(next));
+  };
+
+  const handleViewVotes = (e) => {
+    e.stopPropagation();
+    setIsVotesDialogOpen(true);
   };
 
   return (
     <div className="w-full min-w-65 max-w-sm space-y-3 py-1">
-      {/* Poll Header */}
       <div className="space-y-0.5">
-        <h3 className="text-[15px] font-semibold leading-snug text-foreground wrap-break-word">
+        <h3 className="wrap-break-word text-[15px] font-semibold leading-snug text-foreground">
           {question}
         </h3>
         <p className="text-[11px] font-medium text-muted-foreground">
@@ -92,16 +77,12 @@ export function PollBubble({
         </p>
       </div>
 
-      {/* Options */}
       <div className="space-y-2">
         {options.map((opt) => {
-          const voters = optionVotersMap.get(opt.id) || [];
+          const voters = votersByOption.get(opt.id) || [];
           const voteCount = voters.length;
           const isSelected = mySelectedOptionIds.has(opt.id);
-          const percentage =
-            totalVotersCount > 0
-              ? Math.round((voteCount / totalVotersCount) * 100)
-              : 0;
+          const percentage = votePercentage(voteCount, totalVoters);
 
           return (
             <button
@@ -115,43 +96,31 @@ export function PollBubble({
                   : "border-border/80 bg-card/60 hover:border-border hover:bg-muted/30",
               )}
             >
-              {/* Progress Bar background */}
+              {/* Vote share bar behind the row */}
               {percentage > 0 && (
                 <div
                   className={cn(
-                    "absolute inset-y-0 left-0 transition-all duration-300 pointer-events-none",
+                    "pointer-events-none absolute inset-y-0 left-0 transition-all duration-300",
                     isSelected ? "bg-primary/15" : "bg-muted/70",
                   )}
                   style={{ width: `${percentage}%` }}
                 />
               )}
 
-              {/* Option Content */}
               <div className="relative z-10 flex w-full items-center justify-between gap-3 p-2.5">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {/* Radio / Checkbox Indicator */}
+                <div className="flex min-w-0 items-center gap-2.5">
                   <div className="shrink-0 text-muted-foreground group-hover:text-foreground">
-                    {allowMultipleAnswers ? (
-                      isSelected ? (
-                        <CheckSquare className="h-4 w-4 text-primary fill-primary/10" />
-                      ) : (
-                        <Square className="h-4 w-4" />
-                      )
-                    ) : isSelected ? (
-                      <div className="flex h-4 w-4 items-center justify-center rounded-full border-2 border-primary bg-primary text-primary-foreground">
-                        <div className="h-1.5 w-1.5 rounded-full bg-primary-foreground" />
-                      </div>
-                    ) : (
-                      <Circle className="h-4 w-4" />
-                    )}
+                    <OptionIndicator
+                      multiple={allowMultipleAnswers}
+                      selected={isSelected}
+                    />
                   </div>
 
-                  {/* Option Label */}
                   <span
                     className={cn(
-                      "text-xs font-medium leading-relaxed wrap-break-word line-clamp-2",
+                      "wrap-break-word line-clamp-2 text-xs font-medium leading-relaxed",
                       isSelected
-                        ? "text-foreground font-semibold"
+                        ? "font-semibold text-foreground"
                         : "text-foreground/90",
                     )}
                   >
@@ -159,7 +128,7 @@ export function PollBubble({
                   </span>
                 </div>
 
-                {/* Right side: Voter mini-avatars + Count */}
+                {/* Voter avatars and count */}
                 <div className="flex shrink-0 items-center gap-1.5">
                   {voters.length > 0 && (
                     <div className="flex -space-x-1.5 overflow-hidden">
@@ -168,11 +137,11 @@ export function PollBubble({
                           key={v.id + i}
                           src={v.avatarUrl}
                           name={v.name}
-                          className="h-4 w-4 ring-1 ring-background text-[8px]"
+                          className="h-4 w-4 text-[8px] ring-1 ring-background"
                         />
                       ))}
                       {voters.length > 3 && (
-                        <div className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[8px] font-semibold ring-1 ring-background text-muted-foreground">
+                        <div className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[8px] font-semibold text-muted-foreground ring-1 ring-background">
                           +{voters.length - 3}
                         </div>
                       )}
@@ -189,17 +158,13 @@ export function PollBubble({
         })}
       </div>
 
-      {/* Footer / View Votes Link */}
       <div className="flex items-center justify-between border-t border-border/50 pt-2 text-[11px] text-muted-foreground">
         <span>
-          {totalVotersCount} {totalVotersCount === 1 ? "vote" : "votes"}
+          {totalVoters} {totalVoters === 1 ? "vote" : "votes"}
         </span>
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsVotesDialogOpen(true);
-          }}
+          onClick={handleViewVotes}
           className="flex items-center gap-0.5 font-semibold text-primary hover:underline"
         >
           View votes
@@ -207,7 +172,6 @@ export function PollBubble({
         </button>
       </div>
 
-      {/* Detail Modal */}
       {isVotesDialogOpen && (
         <PollVotesDialog
           open={isVotesDialogOpen}

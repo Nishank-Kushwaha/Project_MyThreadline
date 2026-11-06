@@ -1,18 +1,25 @@
 import React, { useState } from "react";
+import { Plus, Trash2, BarChart2 } from "lucide-react";
+import { toast } from "sonner";
+
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Plus, Trash2, BarChart2 } from "lucide-react";
-import { toast } from "sonner";
 
+const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 12;
 
+// Dialog for building a poll: question, options and the multiple-answers switch
 export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
   const [question, setQuestion] = useState("");
   const [options, setOptions] = useState(["", ""]);
   const [allowMultipleAnswers, setAllowMultipleAnswers] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const filledOptionCount = options.filter((o) => o.trim()).length;
+  const canSubmit =
+    !isSubmitting && question.trim() && filledOptionCount >= MIN_OPTIONS;
 
   const resetForm = () => {
     setQuestion("");
@@ -27,11 +34,7 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
   };
 
   const handleOptionChange = (index, value) => {
-    setOptions((prev) => {
-      const updated = [...prev];
-      updated[index] = value;
-      return updated;
-    });
+    setOptions((prev) => prev.map((opt, i) => (i === index ? value : opt)));
   };
 
   const handleAddOption = () => {
@@ -43,16 +46,17 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
   };
 
   const handleRemoveOption = (index) => {
-    if (options.length <= 2) {
-      toast.error("A poll must have at least 2 options.");
+    if (options.length <= MIN_OPTIONS) {
+      toast.error(`A poll must have at least ${MIN_OPTIONS} options.`);
       return;
     }
     setOptions((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Validates, then hands the poll to the parent; stays open if it returns false
   const handleSubmit = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (e && e.stopPropagation) e.stopPropagation();
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
 
     const trimmedQuestion = question.trim();
     if (!trimmedQuestion) {
@@ -61,12 +65,11 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
     }
 
     const validOptions = options.map((opt) => opt.trim()).filter(Boolean);
-    if (validOptions.length < 2) {
-      toast.error("Please provide at least 2 non-empty options.");
+    if (validOptions.length < MIN_OPTIONS) {
+      toast.error(`Please provide at least ${MIN_OPTIONS} non-empty options.`);
       return;
     }
 
-    // Check for duplicates
     const uniqueOptions = new Set(validOptions.map((o) => o.toLowerCase()));
     if (uniqueOptions.size !== validOptions.length) {
       toast.error("Options cannot be duplicates.");
@@ -75,19 +78,15 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
 
     setIsSubmitting(true);
     try {
-      const pollData = {
+      const result = await onSubmit({
         question: trimmedQuestion,
         options: validOptions.map((text, idx) => ({
           id: `opt_${Date.now()}_${idx}`,
           text,
         })),
         allowMultipleAnswers,
-      };
-
-      const result = await onSubmit(pollData);
-      if (result !== false) {
-        handleClose();
-      }
+      });
+      if (result !== false) handleClose();
     } catch (err) {
       toast.error(err.message || "Failed to create poll");
     } finally {
@@ -95,6 +94,7 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
     }
   };
 
+  // Enter submits, Shift+Enter is ignored
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -110,14 +110,16 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
             <BarChart2 className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Create Poll</h2>
+            <h2 className="text-lg font-semibold text-foreground">
+              Create Poll
+            </h2>
             <p className="text-xs text-muted-foreground">
               Ask a question and let room members vote
             </p>
           </div>
         </div>
 
-        {/* Question field */}
+        {/* Question */}
         <div className="space-y-1.5">
           <Label htmlFor="poll-question" className="text-xs font-medium">
             Question
@@ -134,7 +136,7 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
           />
         </div>
 
-        {/* Options list */}
+        {/* Options */}
         <div className="space-y-2">
           <Label className="text-xs font-medium">Options</Label>
           <div className="max-h-60 space-y-2 overflow-y-auto pr-1 scrollbar-thin">
@@ -151,7 +153,7 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
                   maxLength={100}
                   className="flex-1"
                 />
-                {options.length > 2 && (
+                {options.length > MIN_OPTIONS && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -181,10 +183,13 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
           )}
         </div>
 
-        {/* Multiple Answers Toggle */}
+        {/* Multiple answers */}
         <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
           <div className="space-y-0.5">
-            <Label htmlFor="multiple-answers" className="cursor-pointer text-sm font-medium">
+            <Label
+              htmlFor="multiple-answers"
+              className="cursor-pointer text-sm font-medium"
+            >
               Allow multiple answers
             </Label>
             <p className="text-[11px] text-muted-foreground">
@@ -196,12 +201,12 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
             type="checkbox"
             checked={allowMultipleAnswers}
             onChange={(e) => setAllowMultipleAnswers(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+            className="h-4 w-4 cursor-pointer rounded border-border accent-primary"
           />
         </div>
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+        <div className="flex items-center justify-end gap-2 border-t border-border pt-2">
           <Button
             type="button"
             variant="ghost"
@@ -210,15 +215,7 @@ export function CreatePollDialog({ open, onOpenChange, onSubmit }) {
           >
             Cancel
           </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit}
-            disabled={
-              isSubmitting ||
-              !question.trim() ||
-              options.filter((o) => o.trim()).length < 2
-            }
-          >
+          <Button type="button" onClick={handleSubmit} disabled={!canSubmit}>
             {isSubmitting ? "Creating…" : "Create Poll"}
           </Button>
         </div>
