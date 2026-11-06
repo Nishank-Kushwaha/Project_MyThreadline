@@ -266,7 +266,7 @@ function registerMessageHandlers(io, socket) {
 
         await message.save();
 
-        await message.populate("reactions.userId", "name");
+        await message.populate("reactions.userId", "name avatarUrl");
 
         // Send updated reactions to everyone in the room
         io.to(roomId).emit("message:reaction-update", {

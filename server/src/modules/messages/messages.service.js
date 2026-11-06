@@ -25,7 +25,7 @@ async function getRoomMessages(
         .sort({ createdAt: -1, _id: -1 })
         .limit(half + 1)
         .populate("sender", "name avatarUrl")
-        .populate("reactions.userId", "name")
+        .populate("reactions.userId", "name avatarUrl")
         .populate("poll.votes.userId", "name avatarUrl")
         .lean();
 
@@ -37,7 +37,7 @@ async function getRoomMessages(
         .sort({ createdAt: 1, _id: 1 })
         .limit(half)
         .populate("sender", "name avatarUrl")
-        .populate("reactions.userId", "name")
+        .populate("reactions.userId", "name avatarUrl")
         .populate("poll.votes.userId", "name avatarUrl")
         .lean();
 
@@ -55,7 +55,7 @@ async function getRoomMessages(
     .sort({ createdAt: -1, _id: -1 }) // newest first, so "30 before this point" works
     .limit(limit)
     .populate("sender", "name avatarUrl")
-    .populate("reactions.userId", "name")
+    .populate("reactions.userId", "name avatarUrl")
     .populate("poll.votes.userId", "name avatarUrl")
     .lean();
 
