@@ -7,10 +7,6 @@ import {
   Loader2,
   ShieldCheck,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAuth } from "@/features/auth/context/AuthContext";
 import { useE2EE } from "@/features/e2ee/context/E2EEContext";
@@ -22,7 +18,19 @@ import {
   getBackupStatus,
   restoreBackup,
 } from "@/features/e2ee/lib/backup";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
+const STRENGTH_COLORS = [
+  "bg-destructive",
+  "bg-amber-500",
+  "bg-primary",
+  "bg-emerald-500",
+];
+
+// Subcomponent: Passphrase text or password input field
 function PassphraseField({ id, label, value, onChange, show, disabled }) {
   return (
     <div className="space-y-1.5">
@@ -40,17 +48,85 @@ function PassphraseField({ id, label, value, onChange, show, disabled }) {
   );
 }
 
-const STRENGTH_COLORS = [
-  "bg-destructive",
-  "bg-amber-500",
-  "bg-primary",
-  "bg-emerald-500",
-];
+// Subcomponent: Visual strength meter bar
+function PassphraseStrengthMeter({ strength }) {
+  if (!strength) return null;
+  return (
+    <div className="space-y-1">
+      <div className="flex gap-1">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1 flex-1 rounded-full bg-muted-foreground/20",
+              strength.level > i && STRENGTH_COLORS[strength.level],
+            )}
+          />
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">{strength.label}</p>
+    </div>
+  );
+}
+
+// Subcomponent: Toggle button to switch between visible and obscured passphrase
+function VisibilityToggle({ show, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+    >
+      {show ? (
+        <EyeOff className="h-3.5 w-3.5" />
+      ) : (
+        <Eye className="h-3.5 w-3.5" />
+      )}
+      <span>{show ? "Hide" : "Show"}</span>
+    </button>
+  );
+}
+
+// Subcomponent: Header describing the current state of message history backup
+function BackupStatusHeader({ phase, summary }) {
+  return (
+    <div className="flex items-start gap-3">
+      {phase === "on" ? (
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+      ) : (
+        <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+      )}
+
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold leading-tight">
+          {phase === "none" && "Back up your message history"}
+          {phase === "restore" && "Read your older messages here"}
+          {phase === "changed" && "Your backup changed"}
+          {phase === "on" && "Message backup is on"}
+        </p>
+
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {phase === "none" &&
+            "A new browser can't read messages sent before it was set up. A backup protected by a passphrase fixes that. Only you can open it."}
+          {phase === "restore" &&
+            "Enter your backup passphrase to read messages sent before this device was set up."}
+          {phase === "changed" &&
+            "The backup on the server isn't the one this browser trusted. Only continue if you know why."}
+          {phase === "on" &&
+            summary &&
+            `${summary.devices} device key${summary.devices === 1 ? "" : "s"} saved. Last updated ${new Date(summary.updatedAt).toLocaleDateString()}.`}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function BackupSettings({ className }) {
+  // Context hooks
   const { user } = useAuth();
   const { status, keysChanged, historyVersion } = useE2EE();
 
+  // State hooks
   const [backup, setBackup] = useState({ phase: "loading" });
   const [passphrase, setPassphrase] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -62,6 +138,15 @@ export function BackupSettings({ className }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  // Derived values
+  const strength = checkPassphrase(passphrase);
+  const matches = passphrase.length > 0 && passphrase === confirm;
+  const cardClassName = cn(
+    "flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4",
+    className,
+  );
+
+  // Load backup status from backend
   const load = useCallback(async () => {
     try {
       setBackup(await getBackupStatus(user.id));
@@ -71,10 +156,14 @@ export function BackupSettings({ className }) {
     }
   }, [user.id]);
 
+  // Sync status on ready and history updates
   useEffect(() => {
-    if (status === "ready") load();
+    if (status === "ready") {
+      load();
+    }
   }, [status, load, historyVersion]);
 
+  // Form helpers and actions
   const resetForm = () => {
     setPassphrase("");
     setConfirm("");
@@ -139,58 +228,27 @@ export function BackupSettings({ className }) {
       () => "Your passphrase was changed.",
     );
 
-  const generate = () => {
+  const handleGenerate = () => {
     const generated = generatePassphrase();
     setPassphrase(generated);
     setConfirm(generated);
     setShow(true);
   };
 
-  const strength = checkPassphrase(passphrase);
-  const matches = passphrase.length > 0 && passphrase === confirm;
-
-  const strengthBar = passphrase.length > 0 && (
-    <div className="space-y-1">
-      <div className="flex gap-1">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className={cn(
-              "h-1 flex-1 rounded-full bg-muted-foreground/20",
-              strength.level > i && STRENGTH_COLORS[strength.level],
-            )}
-          />
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">{strength.label}</p>
-    </div>
-  );
-
-  const showToggle = (
-    <button
-      type="button"
-      onClick={() => setShow((value) => !value)}
-      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-    >
-      {show ? (
-        <EyeOff className="h-3.5 w-3.5" />
-      ) : (
-        <Eye className="h-3.5 w-3.5" />
-      )}
-      {show ? "Hide" : "Show"}
-    </button>
-  );
-
-  const card = cn(
-    "flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4",
-    className,
-  );
+  const handleCopyPassphrase = async () => {
+    try {
+      await navigator.clipboard?.writeText(passphrase);
+      toast.success("Passphrase copied to clipboard");
+    } catch {
+      toast.error("Failed to copy passphrase");
+    }
+  };
 
   if (status !== "ready") return null;
 
   if (backup.phase === "loading") {
     return (
-      <div className={card}>
+      <div className={cardClassName}>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Checking your backup…
         </p>
@@ -200,7 +258,7 @@ export function BackupSettings({ className }) {
 
   if (backup.phase === "error") {
     return (
-      <div className={card}>
+      <div className={cardClassName}>
         <p className="text-sm text-destructive">Couldn't check your backup.</p>
         <Button size="sm" variant="outline" onClick={load}>
           Retry
@@ -210,34 +268,8 @@ export function BackupSettings({ className }) {
   }
 
   return (
-    <div className={card}>
-      <div className="flex items-start gap-3">
-        {backup.phase === "on" ? (
-          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
-        ) : (
-          <KeyRound className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
-        )}
-
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold leading-tight">
-            {backup.phase === "none" && "Back up your message history"}
-            {backup.phase === "restore" && "Read your older messages here"}
-            {backup.phase === "changed" && "Your backup changed"}
-            {backup.phase === "on" && "Message backup is on"}
-          </p>
-
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {backup.phase === "none" &&
-              "A new browser can't read messages sent before it was set up. A backup protected by a passphrase fixes that. Only you can open it."}
-            {backup.phase === "restore" &&
-              "Enter your backup passphrase to read messages sent before this device was set up."}
-            {backup.phase === "changed" &&
-              "The backup on the server isn't the one this browser trusted. Only continue if you know why."}
-            {backup.phase === "on" &&
-              `${backup.summary.devices} device key${backup.summary.devices === 1 ? "" : "s"} saved. Last updated ${new Date(backup.summary.updatedAt).toLocaleDateString()}.`}
-          </p>
-        </div>
-      </div>
+    <div className={cardClassName}>
+      <BackupStatusHeader phase={backup.phase} summary={backup.summary} />
 
       {(backup.phase === "none" ||
         backup.phase === "restore" ||
@@ -266,7 +298,9 @@ export function BackupSettings({ className }) {
 
           {(backup.phase === "none" || isChanging) && (
             <>
-              {strengthBar}
+              {passphrase.length > 0 && (
+                <PassphraseStrengthMeter strength={strength} />
+              )}
 
               <PassphraseField
                 id="backupConfirm"
@@ -282,7 +316,7 @@ export function BackupSettings({ className }) {
                   type="button"
                   size="sm"
                   variant="outline"
-                  onClick={generate}
+                  onClick={handleGenerate}
                   disabled={busy}
                 >
                   Generate one for me
@@ -291,14 +325,7 @@ export function BackupSettings({ className }) {
                 {passphrase && (
                   <button
                     type="button"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard?.writeText(passphrase);
-                        toast.success("Passphrase copied to clipboard");
-                      } catch {
-                        toast.error("Failed to copy passphrase");
-                      }
-                    }}
+                    onClick={handleCopyPassphrase}
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                   >
                     <Copy className="h-3.5 w-3.5" /> Copy
@@ -308,7 +335,12 @@ export function BackupSettings({ className }) {
             </>
           )}
 
-          <div>{showToggle}</div>
+          <div>
+            <VisibilityToggle
+              show={show}
+              onToggle={() => setShow((value) => !value)}
+            />
+          </div>
 
           {(backup.phase === "none" || isChanging) && (
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
