@@ -14,7 +14,13 @@ import { cn } from "@/lib/utils";
 const FRONT = /front/i;
 const REAR = /back|rear|environment/i;
 
-/** Phones name cameras things like "camera2 1, facing front": show a human label. */
+// Strips hardware hex ids like (04f2:b6ea) from raw device labels
+function cleanLabel(label, fallback) {
+  if (!label) return fallback;
+  return label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "");
+}
+
+// Converts raw camera labels into clean human-readable camera descriptions
 function cameraName(device, index, all) {
   const label = device.label || "";
   if (FRONT.test(label)) return "Front camera";
@@ -27,13 +33,8 @@ function cameraName(device, index, all) {
   return cleanLabel(label, `Camera ${index + 1}`);
 }
 
-// "Integrated Camera (04f2:b6ea)" -> "Integrated Camera"
-function cleanLabel(label, fallback) {
-  if (!label) return fallback;
-  return label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, "");
-}
-
-function Section({ icon: Icon, title, hint, children }) {
+// Subcomponent: Group container for a media device category
+function DeviceSection({ icon: Icon, title, hint, children }) {
   return (
     <div className="py-1">
       <div className="flex items-center gap-2 px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
@@ -50,7 +51,8 @@ function Section({ icon: Icon, title, hint, children }) {
   );
 }
 
-function Option({ label, selected, busy, disabled, onClick }) {
+// Subcomponent: Clickable radio option for selecting a specific device
+function DeviceOption({ label, selected, busy, disabled, onClick }) {
   return (
     <button
       type="button"
@@ -74,15 +76,40 @@ function Option({ label, selected, busy, disabled, onClick }) {
   );
 }
 
-const Empty = ({ children }) => (
-  <p className="px-3 py-2 text-sm text-zinc-500">{children}</p>
-);
+// Subcomponent: Empty state text placeholder when no devices are detected
+function DeviceEmpty({ children }) {
+  return <p className="px-3 py-2 text-sm text-zinc-500">{children}</p>;
+}
 
-/**
- * Settings button + popup for choosing microphone, camera and speaker during a call.
- * Rendered inside <CallControls/> (which must be `relative`), the popup opens above it.
- */
+// Subcomponent: Mobile camera flip toggle button
+function FlipCameraButton({ canFlip, locked, isBusy, cameraFacing, onFlip }) {
+  if (!canFlip) return null;
+
+  return (
+    <button
+      type="button"
+      disabled={locked}
+      onClick={onFlip}
+      className={cn(
+        "flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-200 transition hover:bg-white/5",
+        locked && !isBusy && "opacity-50",
+      )}
+    >
+      <SwitchCamera className="h-4 w-4 shrink-0 text-zinc-400" />
+      <span className="flex-1">Flip camera</span>
+      {isBusy ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <span className="text-xs text-zinc-400">
+          {cameraFacing === "environment" ? "Rear" : "Front"}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function DevicePicker() {
+  // Context hooks
   const {
     callType,
     isScreenSharing,
@@ -98,35 +125,47 @@ export function DevicePicker() {
     changeSpeaker,
   } = useCall();
 
+  // State hooks
   const [open, setOpen] = useState(false);
   const [busyKey, setBusyKey] = useState(null);
+
+  // Element refs
   const rootRef = useRef(null);
   const buttonRef = useRef(null);
 
-  // Refresh the lists when opening; close on outside click / Escape
+  // Derived device collections
+  const { audioInputs, videoInputs, audioOutputs } = availableDevices;
+  const speakers = audioOutputs.filter((d) => d.deviceId !== "default");
+  const locked = Boolean(busyKey);
+
+  // Refresh hardware list on open and close on outside click or Escape
   useEffect(() => {
     if (!open) return undefined;
     refreshDevices?.();
 
     const onPointerDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target))
+      if (rootRef.current && !rootRef.current.contains(e.target)) {
         setOpen(false);
+      }
     };
+
     const onKeyDown = (e) => {
       if (e.key === "Escape") {
         setOpen(false);
         buttonRef.current?.focus();
       }
     };
+
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open, refreshDevices]);
 
-  // One switch at a time; the context already shows an error toast if it fails
+  // Action runner allowing only one device transition at a time
   const run = async (key, fn) => {
     if (busyKey) return;
     setBusyKey(key);
@@ -137,12 +176,9 @@ export function DevicePicker() {
     }
   };
 
-  const { audioInputs, videoInputs, audioOutputs } = availableDevices;
-  const speakers = audioOutputs.filter((d) => d.deviceId !== "default");
-  const locked = Boolean(busyKey);
-
   return (
     <div ref={rootRef} className="contents">
+      {/* Settings popover toggle button */}
       <button
         ref={buttonRef}
         type="button"
@@ -161,11 +197,11 @@ export function DevicePicker() {
         <Settings2 className="h-5 w-5" />
       </button>
 
+      {/* Popover dialog */}
       {open && (
         <div
           role="dialog"
           aria-label="Audio and video settings"
-          // Centered on the control bar without CSS transforms (they would clash with the fade-in animation)
           style={{
             left: "50%",
             width: "min(20rem, calc(100vw - 2rem))",
@@ -173,15 +209,15 @@ export function DevicePicker() {
           }}
           className="absolute bottom-full z-40 mb-3 max-h-[60vh] overflow-y-auto rounded-2xl border border-white/10 bg-zinc-900/95 p-2 text-white shadow-2xl backdrop-blur-xl animate-in fade-in duration-150"
         >
-          {/* MICROPHONE */}
-          <Section icon={Mic} title="Microphone">
+          {/* Microphone device selection */}
+          <DeviceSection icon={Mic} title="Microphone">
             {audioInputs.length === 0 ? (
-              <Empty>No microphone found</Empty>
+              <DeviceEmpty>No microphone found</DeviceEmpty>
             ) : (
               audioInputs.map((d, i) => {
                 const selected = d.deviceId === selectedDevices.audioInputId;
                 return (
-                  <Option
+                  <DeviceOption
                     key={d.deviceId || i}
                     label={cleanLabel(d.label, `Microphone ${i + 1}`)}
                     selected={selected}
@@ -197,11 +233,11 @@ export function DevicePicker() {
                 );
               })
             )}
-          </Section>
+          </DeviceSection>
 
-          {/* CAMERA (video calls only) */}
+          {/* Camera device selection (video calls only) */}
           {callType === "video" && (
-            <Section
+            <DeviceSection
               icon={Video}
               title="Camera"
               hint={
@@ -210,35 +246,21 @@ export function DevicePicker() {
                   : null
               }
             >
-              {canFlipCamera && (
-                <button
-                  type="button"
-                  disabled={locked}
-                  onClick={() => run("flip", flipCamera)}
-                  className={cn(
-                    "flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-200 transition hover:bg-white/5",
-                    locked && busyKey !== "flip" && "opacity-50",
-                  )}
-                >
-                  <SwitchCamera className="h-4 w-4 shrink-0 text-zinc-400" />
-                  <span className="flex-1">Flip camera</span>
-                  {busyKey === "flip" ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <span className="text-xs text-zinc-400">
-                      {cameraFacing === "environment" ? "Rear" : "Front"}
-                    </span>
-                  )}
-                </button>
-              )}
+              <FlipCameraButton
+                canFlip={canFlipCamera}
+                locked={locked}
+                isBusy={busyKey === "flip"}
+                cameraFacing={cameraFacing}
+                onFlip={() => run("flip", flipCamera)}
+              />
 
               {videoInputs.length === 0 ? (
-                <Empty>No camera found</Empty>
+                <DeviceEmpty>No camera found</DeviceEmpty>
               ) : (
                 videoInputs.map((d, i) => {
                   const selected = d.deviceId === selectedDevices.videoInputId;
                   return (
-                    <Option
+                    <DeviceOption
                       key={d.deviceId || i}
                       label={cameraName(d, i, videoInputs)}
                       selected={selected}
@@ -252,14 +274,14 @@ export function DevicePicker() {
                   );
                 })
               )}
-            </Section>
+            </DeviceSection>
           )}
 
-          {/* SPEAKER */}
-          <Section icon={Volume2} title="Speaker">
+          {/* Speaker device selection */}
+          <DeviceSection icon={Volume2} title="Speaker">
             {supportsOutputSelection ? (
               <>
-                <Option
+                <DeviceOption
                   label="System default"
                   selected={!selectedDevices.audioOutputId}
                   busy={busyKey === "spk:"}
@@ -272,7 +294,7 @@ export function DevicePicker() {
                 {speakers.map((d, i) => {
                   const selected = d.deviceId === selectedDevices.audioOutputId;
                   return (
-                    <Option
+                    <DeviceOption
                       key={d.deviceId || i}
                       label={cleanLabel(d.label, `Speaker ${i + 1}`)}
                       selected={selected}
@@ -289,9 +311,11 @@ export function DevicePicker() {
                 })}
               </>
             ) : (
-              <Empty>Your browser chooses the speaker automatically</Empty>
+              <DeviceEmpty>
+                Your browser chooses the speaker automatically
+              </DeviceEmpty>
             )}
-          </Section>
+          </DeviceSection>
         </div>
       )}
     </div>

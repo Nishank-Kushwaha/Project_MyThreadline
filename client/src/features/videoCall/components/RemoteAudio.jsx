@@ -1,50 +1,53 @@
 import React, { useEffect, useMemo, useRef } from "react";
 
-/**
- * The ONLY element that plays remote audio. It is mounted once for the whole
- * call (from CallProvider), so minimizing/maximizing the call UI never
- * interrupts the sound or creates a second playback path (a source of echo).
- */
+// Headless media element managing remote peer audio playback and sink output selection
 export function RemoteAudio({ stream, outputDeviceId, onOutputError }) {
-  const ref = useRef(null);
+  // Element refs
+  const audioRef = useRef(null);
+  const onOutputErrorRef = useRef(onOutputError);
+  onOutputErrorRef.current = onOutputError;
 
-  // Audio-only view of the stream
-  const audioStream = useMemo(
-    () =>
-      stream && stream.getAudioTracks().length
-        ? new MediaStream(stream.getAudioTracks())
-        : null,
-    [stream],
-  );
+  // Memoized audio-only view extracted from composite media stream
+  const audioStream = useMemo(() => {
+    if (stream && stream.getAudioTracks().length > 0) {
+      return new MediaStream(stream.getAudioTracks());
+    }
+    return null;
+  }, [stream]);
 
+  // Bind audio stream to DOM element and handle browser autoplay policy restrictions
   useEffect(() => {
-    const el = ref.current;
+    const el = audioRef.current;
     if (!el) return;
 
-    if (el.srcObject !== audioStream) el.srcObject = audioStream;
+    if (el.srcObject !== audioStream) {
+      el.srcObject = audioStream;
+    }
     if (!audioStream) return;
 
     let cleanup = null;
     el.play().catch(() => {
-      // Autoplay blocked: retry on the next user gesture
+      // Autoplay blocked by browser policy: retry on next user gesture
       const retry = () => el.play().catch(() => {});
       document.addEventListener("pointerdown", retry, { once: true });
       cleanup = () => document.removeEventListener("pointerdown", retry);
     });
+
     return () => cleanup?.();
   }, [audioStream]);
 
-  // Speaker selection (Chromium). "" means the system default, so switching BACK to default works too.
-  const onOutputErrorRef = useRef(onOutputError);
-  onOutputErrorRef.current = onOutputError;
+  // Configure speaker output destination using Chromium setSinkId API
   useEffect(() => {
-    const el = ref.current;
+    const el = audioRef.current;
     if (!el || typeof el.setSinkId !== "function") return;
+
     el.setSinkId(outputDeviceId || "").catch(() => {
-      // The chosen speaker is gone or not allowed: let the app fall back to the default
-      if (outputDeviceId) onOutputErrorRef.current?.();
+      // If configured audio sink fails or disconnects, notify parent to fallback
+      if (outputDeviceId) {
+        onOutputErrorRef.current?.();
+      }
     });
   }, [outputDeviceId]);
 
-  return <audio ref={ref} autoPlay playsInline />;
+  return <audio ref={audioRef} autoPlay playsInline />;
 }

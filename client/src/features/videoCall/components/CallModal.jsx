@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Lock, PhoneOff, Maximize2, ShieldCheck, Loader2 } from "lucide-react";
-import { useCall } from "@/features/videoCall/context/CallContext";
 import { useAuth } from "@/features/auth/context/AuthContext";
-import { cn } from "@/lib/utils";
+import { useCall } from "@/features/videoCall/context/CallContext";
 import { VideoGrid } from "./VideoGrid";
 import { CallControls } from "./CallControls";
+import { cn } from "@/lib/utils";
 
+// Format seconds into HH:MM:SS or MM:SS time strings
 function formatDuration(totalSeconds) {
   const hrs = Math.floor(totalSeconds / 3600);
   const mins = Math.floor((totalSeconds % 3600) / 60);
@@ -18,20 +19,16 @@ function formatDuration(totalSeconds) {
   return `${pad(mins)}:${pad(secs)}`;
 }
 
-/**
- * Media link phase while the call is accepted:
- *  - "live"          -> connected, media flowing
- *  - "reconnecting"  -> was live, connection dropped (ICE restart in progress)
- *  - "connecting"    -> still setting up (new / connecting / not created yet)
- */
+// Map WebRTC connection state to high-level call link phases
 function getLinkPhase(connectionState) {
   if (connectionState === "connected") return "live";
-  if (connectionState === "disconnected" || connectionState === "failed")
+  if (connectionState === "disconnected" || connectionState === "failed") {
     return "reconnecting";
+  }
   return "connecting";
 }
 
-/** Signal bars: green = good, amber = weak, red = poor. Label only shown when not good. */
+// Subcomponent: Three-bar network signal quality indicator
 function NetworkIndicator({ quality = "good" }) {
   const level = quality === "poor" ? 1 : quality === "fair" ? 2 : 3;
   const barColor =
@@ -80,13 +77,24 @@ function NetworkIndicator({ quality = "good" }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// DRAGGABLE MINIMIZED WINDOW
-// ---------------------------------------------------------------------------
-const MINI_W = 288; // matches the old w-72
-const MINI_H = 192; // matches the old h-48
+// Window dimension dimensions and corner snapping constants
+const MINI_W = 288;
+const MINI_H = 192;
 const MINI_MARGIN = 16;
 
+const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
+
+function cornerPosition(corner, vw, vh) {
+  const x = corner.includes("l")
+    ? MINI_MARGIN
+    : Math.max(MINI_MARGIN, vw - MINI_W - MINI_MARGIN);
+  const y = corner.includes("t")
+    ? MINI_MARGIN
+    : Math.max(MINI_MARGIN, vh - MINI_H - MINI_MARGIN);
+  return { x, y };
+}
+
+// Viewport resize tracking hook
 function useViewportSize() {
   const [size, setSize] = useState(() => ({
     w: typeof window === "undefined" ? 1280 : window.innerWidth,
@@ -107,27 +115,10 @@ function useViewportSize() {
   return size;
 }
 
-/** corner is one of "tl" | "tr" | "bl" | "br" */
-function cornerPosition(corner, vw, vh) {
-  const x = corner.includes("l")
-    ? MINI_MARGIN
-    : Math.max(MINI_MARGIN, vw - MINI_W - MINI_MARGIN);
-  const y = corner.includes("t")
-    ? MINI_MARGIN
-    : Math.max(MINI_MARGIN, vh - MINI_H - MINI_MARGIN);
-  return { x, y };
-}
-
-const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
-
-/**
- * Floating call window. Drag it anywhere with a mouse or finger; on release it
- * glides to the nearest screen corner. Buttons inside stay clickable.
- * The corner is owned by the parent so it is remembered after maximizing.
- */
+// Subcomponent: Draggable floating container that snaps to nearest screen corner on release
 function DraggableMiniWindow({ corner, onCornerChange, children }) {
   const { w: vw, h: vh } = useViewportSize();
-  const [drag, setDrag] = useState(null); // {x, y} while dragging, else null
+  const [drag, setDrag] = useState(null);
   const gestureRef = useRef(null);
 
   const resting = cornerPosition(corner, vw, vh);
@@ -142,8 +133,8 @@ function DraggableMiniWindow({ corner, onCornerChange, children }) {
   };
 
   const handlePointerDown = (e) => {
-    if (e.button !== undefined && e.button !== 0) return; // primary button / touch only
-    if (e.target.closest("button")) return; // let buttons work normally
+    if (e.button !== undefined && e.button !== 0) return;
+    if (e.target.closest("button")) return;
 
     e.currentTarget.setPointerCapture?.(e.pointerId);
     gestureRef.current = {
@@ -166,7 +157,6 @@ function DraggableMiniWindow({ corner, onCornerChange, children }) {
     gestureRef.current = null;
     setDrag(null);
 
-    // Snap to whichever corner the window's center is closest to
     const centerX = x + MINI_W / 2;
     const centerY = y + MINI_H / 2;
     onCornerChange(
@@ -180,7 +170,7 @@ function DraggableMiniWindow({ corner, onCornerChange, children }) {
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
       onPointerCancel={finishDrag}
-      onDragStart={(e) => e.preventDefault()} // stop the browser's native image drag (avatar ghost)
+      onDragStart={(e) => e.preventDefault()}
       style={{
         width: MINI_W,
         height: MINI_H,
@@ -197,13 +187,133 @@ function DraggableMiniWindow({ corner, onCornerChange, children }) {
         {children}
       </div>
 
-      {/* Little grip so people can tell it is draggable */}
       <span className="pointer-events-none absolute left-1/2 top-1.5 z-30 h-1 w-8 -translate-x-1/2 rounded-full bg-white/40" />
     </div>
   );
 }
 
+// Subcomponent: Status badge shown in minimized picture-in-picture view
+function MiniStatusBadge({
+  callStatus,
+  isLive,
+  phase,
+  networkQuality,
+  duration,
+}) {
+  return (
+    <div className="pointer-events-none absolute top-2 left-2 z-30 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-md">
+      {callStatus === "calling" ? (
+        <>
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Calling…</span>
+        </>
+      ) : isLive ? (
+        <>
+          <span
+            className={cn(
+              "h-2 w-2 rounded-full",
+              networkQuality === "poor"
+                ? "bg-red-500"
+                : networkQuality === "fair"
+                  ? "bg-amber-400"
+                  : "bg-emerald-500 animate-pulse",
+            )}
+          />
+          <span>{formatDuration(duration)}</span>
+        </>
+      ) : (
+        <>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>
+            {phase === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Subcomponent: Header displayed on full-screen view with peer info and encryption status
+function FullscreenCallHeader({
+  peerName,
+  callStatus,
+  isLive,
+  phase,
+  duration,
+  networkQuality,
+}) {
+  return (
+    <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between p-4 bg-linear-to-b from-black/80 via-black/40 to-transparent">
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col">
+          <h2 className="text-lg font-bold text-white tracking-tight">
+            {peerName}
+          </h2>
+          <div className="flex items-center gap-1.5 text-xs text-zinc-300">
+            {callStatus === "calling" ? (
+              <span className="text-zinc-400 animate-pulse">Ringing…</span>
+            ) : isLive ? (
+              <>
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-mono">{formatDuration(duration)}</span>
+                <span>•</span>
+                <NetworkIndicator quality={networkQuality} />
+                <span>•</span>
+                <span className="flex items-center gap-1 text-emerald-400">
+                  <ShieldCheck className="h-3 w-3" />
+                  <span>DTLS-SRTP Encrypted</span>
+                </span>
+              </>
+            ) : (
+              <span
+                className={cn(
+                  "flex items-center gap-1.5",
+                  phase === "reconnecting"
+                    ? "text-amber-300"
+                    : "text-zinc-300",
+                )}
+              >
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>
+                  {phase === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+                </span>
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs text-white backdrop-blur-md">
+        <Lock className="h-3.5 w-3.5 text-emerald-400" />
+        <span className="hidden sm:inline">End-to-End Encrypted</span>
+      </div>
+    </header>
+  );
+}
+
+// Subcomponent: Overlay notification banner for reconnection and connection progress
+function ReconnectingOverlay({ isReconnecting, message }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none absolute left-1/2 top-24 z-20 -translate-x-1/2"
+    >
+      <div
+        className={cn(
+          "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md",
+          isReconnecting ? "bg-amber-500/80" : "bg-black/60",
+        )}
+      >
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span>{message}</span>
+      </div>
+    </div>
+  );
+}
+
 export function CallModal() {
+  // Context hooks
   const { user: currentUser } = useAuth();
   const {
     callStatus,
@@ -233,18 +343,21 @@ export function CallModal() {
     toggleScreenShare,
   } = useCall();
 
-  // Remembered between minimize / maximize (must stay above the early return)
+  // State hooks
   const [miniCorner, setMiniCorner] = useState("br");
 
+  // Early return if not currently in an active or dialing call
   if (callStatus !== "calling" && callStatus !== "connected") {
     return null;
   }
 
+  // Derived state
   const phase =
     callStatus === "connected" ? getLinkPhase(connectionState) : null;
   const isLive = phase === "live";
+  const handleEndCall = callStatus === "calling" ? cancelCall : endCall;
 
-  // 1. FLOATING MINIMIZED WINDOW (draggable, snaps to corners)
+  // Minimized picture-in-picture draggable modal
   if (isMinimized) {
     return (
       <DraggableMiniWindow corner={miniCorner} onCornerChange={setMiniCorner}>
@@ -267,7 +380,6 @@ export function CallModal() {
             cameraFacing={cameraFacing}
           />
 
-          {/* Quick Expand Button */}
           <button
             type="button"
             onClick={() => setIsMinimized(false)}
@@ -277,45 +389,21 @@ export function CallModal() {
             <Maximize2 className="h-4 w-4" />
           </button>
 
-          {/* Floating Status Badge */}
-          <div className="pointer-events-none absolute top-2 left-2 z-30 flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-md">
-            {callStatus === "calling" ? (
-              <>
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Calling…</span>
-              </>
-            ) : isLive ? (
-              <>
-                <span
-                  className={cn(
-                    "h-2 w-2 rounded-full",
-                    networkQuality === "poor"
-                      ? "bg-red-500"
-                      : networkQuality === "fair"
-                        ? "bg-amber-400"
-                        : "bg-emerald-500 animate-pulse",
-                  )}
-                />
-                <span>{formatDuration(duration)}</span>
-              </>
-            ) : (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>
-                  {phase === "reconnecting" ? "Reconnecting…" : "Connecting…"}
-                </span>
-              </>
-            )}
-          </div>
+          <MiniStatusBadge
+            callStatus={callStatus}
+            isLive={isLive}
+            phase={phase}
+            networkQuality={networkQuality}
+            duration={duration}
+          />
 
-          {/* Mini name + end-call bar: overlays the video, ~90% transparent */}
           <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 bg-black/10 px-3 py-2">
             <span className="truncate text-xs font-semibold text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
               {peer?.name}
             </span>
             <button
               type="button"
-              onClick={callStatus === "calling" ? cancelCall : endCall}
+              onClick={handleEndCall}
               aria-label="End call"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-black/40 hover:bg-red-700 transition"
             >
@@ -327,58 +415,18 @@ export function CallModal() {
     );
   }
 
-  // 2. FULLSCREEN VIEWPORT
+  // Fullscreen call layout
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-zinc-950 animate-in fade-in duration-200">
-      {/* Top Header Bar */}
-      <header className="absolute top-0 left-0 right-0 z-30 flex items-center justify-between p-4 bg-linear-to-b from-black/80 via-black/40 to-transparent">
-        <div className="flex items-center gap-3">
-          <div className="flex flex-col">
-            <h2 className="text-lg font-bold text-white tracking-tight">
-              {peer?.name}
-            </h2>
-            <div className="flex items-center gap-1.5 text-xs text-zinc-300">
-              {callStatus === "calling" ? (
-                <span className="text-zinc-400 animate-pulse">Ringing…</span>
-              ) : isLive ? (
-                <>
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-mono">{formatDuration(duration)}</span>
-                  <span>•</span>
-                  <NetworkIndicator quality={networkQuality} />
-                  <span>•</span>
-                  <span className="flex items-center gap-1 text-emerald-400">
-                    <ShieldCheck className="h-3 w-3" />
-                    <span>DTLS-SRTP Encrypted</span>
-                  </span>
-                </>
-              ) : (
-                <span
-                  className={cn(
-                    "flex items-center gap-1.5",
-                    phase === "reconnecting"
-                      ? "text-amber-300"
-                      : "text-zinc-300",
-                  )}
-                >
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>
-                    {phase === "reconnecting" ? "Reconnecting…" : "Connecting…"}
-                  </span>
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+      <FullscreenCallHeader
+        peerName={peer?.name}
+        callStatus={callStatus}
+        isLive={isLive}
+        phase={phase}
+        duration={duration}
+        networkQuality={networkQuality}
+      />
 
-        {/* E2EE Lock Indicator */}
-        <div className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs text-white backdrop-blur-md">
-          <Lock className="h-3.5 w-3.5 text-emerald-400" />
-          <span className="hidden sm:inline">End-to-End Encrypted</span>
-        </div>
-      </header>
-
-      {/* Main Video Viewport */}
       <main className="relative flex-1">
         <VideoGrid
           localStream={localStream}
@@ -398,35 +446,20 @@ export function CallModal() {
           cameraFacing={cameraFacing}
         />
 
-        {/* Connecting / Reconnecting pill over the video */}
         {callStatus === "connected" && (!isLive || peerReconnecting) && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="pointer-events-none absolute left-1/2 top-24 z-20 -translate-x-1/2"
-          >
-            <div
-              className={cn(
-                "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md",
-                phase === "reconnecting" || peerReconnecting
-                  ? "bg-amber-500/80"
-                  : "bg-black/60",
-              )}
-            >
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>
-                {phase === "reconnecting"
-                  ? "Connection lost. Reconnecting…"
-                  : peerReconnecting
-                    ? `${peer?.name || "The other person"} lost connection. Waiting for them to return…`
-                    : "Connecting…"}
-              </span>
-            </div>
-          </div>
+          <ReconnectingOverlay
+            isReconnecting={phase === "reconnecting" || peerReconnecting}
+            message={
+              phase === "reconnecting"
+                ? "Connection lost. Reconnecting…"
+                : peerReconnecting
+                  ? `${peer?.name || "The other person"} lost connection. Waiting for them to return…`
+                  : "Connecting…"
+            }
+          />
         )}
       </main>
 
-      {/* Bottom Floating Control Bar */}
       <footer className="absolute bottom-6 left-0 right-0 z-30 flex justify-center px-4">
         <CallControls
           isAudioMuted={isAudioMuted}
@@ -437,7 +470,7 @@ export function CallModal() {
           onToggleCamera={toggleCamera}
           onToggleScreenShare={toggleScreenShare}
           onToggleMinimize={() => setIsMinimized(true)}
-          onEndCall={callStatus === "calling" ? cancelCall : endCall}
+          onEndCall={handleEndCall}
         />
       </footer>
     </div>

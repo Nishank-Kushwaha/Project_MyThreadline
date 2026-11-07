@@ -1,48 +1,52 @@
 import React, { useRef, useEffect, useMemo, useState } from "react";
-import { Avatar } from "@/components/ui/avatar";
 import { MicOff, VideoOff, Expand, Shrink } from "lucide-react";
+import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
-/**
- * Auto layout: if the incoming video's shape is within this factor of the
- * viewport's shape we fill the viewport (crops at most ~15%). Otherwise we show
- * the WHOLE frame in a framed box that has exactly the video's own shape.
- */
+// Viewport aspect ratio tolerance for auto-filling screen without excessive cropping
 const FILL_TOLERANCE = 1.2;
 
-// Space kept free in "fit" mode so the call header / control bar never cover the picture
+// Insets to prevent call controls and header from occluding fitted video feeds
 const HEADER_INSET = 64;
 const CONTROLS_INSET = 100;
 const SIDE_PAD = 12;
 
-/** Bind a stream to a <video> only if it changed, and force muted in code. */
+// Custom hook to bind a media stream to a HTML5 video element safely
 function useBindVideo(ref, stream, deps = []) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.muted = true;
     el.defaultMuted = true;
-    if (el.srcObject !== stream) el.srcObject = stream || null;
-    if (stream) el.play().catch(() => {});
+    if (el.srcObject !== stream) {
+      el.srcObject = stream || null;
+    }
+    if (stream) {
+      el.play().catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream, ...deps]);
 }
 
-/** Real pixel size of the video being decoded (updates on rotation / source switch). */
+// Custom hook to track decoded video resolution changes (orientation / track switch)
 function useVideoDims(ref, stream, deps = []) {
   const [dims, setDims] = useState({ w: 0, h: 0 });
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+
     const read = () => {
       const w = el.videoWidth;
       const h = el.videoHeight;
       setDims((p) => (p.w === w && p.h === h ? p : { w, h }));
     };
+
     el.addEventListener("loadedmetadata", read);
     el.addEventListener("resize", read);
     el.addEventListener("playing", read);
     read();
+
     return () => {
       el.removeEventListener("loadedmetadata", read);
       el.removeEventListener("resize", read);
@@ -50,37 +54,32 @@ function useVideoDims(ref, stream, deps = []) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream, ...deps]);
+
   return dims;
 }
 
-/** Size of the area the video is shown in (updates on window resize / rotation / minimize). */
+// Custom hook observing container dimensions via ResizeObserver
 function useElementSize(ref) {
   const [size, setSize] = useState({ w: 0, h: 0 });
+
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+
     const ro = new ResizeObserver(([entry]) => {
       const w = Math.round(entry.contentRect.width);
       const h = Math.round(entry.contentRect.height);
       setSize((p) => (p.w === w && p.h === h ? p : { w, h }));
     });
+
     ro.observe(el);
     return () => ro.disconnect();
   }, [ref]);
+
   return size;
 }
 
-/**
- * Animation engine shared by the speaking ring and the level bars.
- *
- * Turns the raw audio level into two eased signals and calls `onFrame` every
- * frame ONLY while something is visible, then stops its own loop:
- *   presence : 0..1  "is this person talking"  (fast fade in, slower fade out)
- *   level    : 0..1  loudness (quick attack, slow release; square-root curve so
- *                    soft voices still register and loud ones do not blow out)
- * Time-based easing keeps it identical on 60 Hz and 120 Hz screens.
- * With "reduce motion" enabled the level stays steady instead of reacting.
- */
+// Animation driver converting raw audio levels into smoothed presence and level curves
 function useLevelAnimation(active, levelRef, onFrame) {
   const stateRef = useRef({ presence: 0, level: 0 });
   const frameRef = useRef(onFrame);
@@ -125,7 +124,10 @@ function useLevelAnimation(active, levelRef, onFrame) {
         t: now,
         reduced,
       });
-      if (!settled) raf = requestAnimationFrame(tick);
+
+      if (!settled) {
+        raf = requestAnimationFrame(tick);
+      }
     };
 
     raf = requestAnimationFrame(tick);
@@ -133,11 +135,7 @@ function useLevelAnimation(active, levelRef, onFrame) {
   }, [active, levelRef]);
 }
 
-/**
- * Speaking indicator: a crisp thin ring that fades in when the person talks,
- * with a soft halo that swells gently with their volume.
- * Restrained on purpose (2px line, low-alpha halo), no neon.
- */
+// Subcomponent: Animated speaking indicator ring that gently glows and scales with volume
 function SpeakingRing({ active, levelRef, inset = false, className }) {
   const ref = useRef(null);
 
@@ -162,10 +160,7 @@ function SpeakingRing({ active, levelRef, inset = false, className }) {
   );
 }
 
-/**
- * Tiny three-bar voice meter (like Meet / Teams). Takes no space when silent
- * and slides open smoothly when the person speaks.
- */
+// Subcomponent: Dynamic three-bar audio level meter
 function LevelBars({ active, levelRef, className }) {
   const barsRef = useRef([]);
   const weights = [0.75, 1, 0.85];
@@ -205,6 +200,173 @@ function LevelBars({ active, levelRef, className }) {
   );
 }
 
+// Subcomponent: Fallback display when remote video is unavailable or turned off
+function RemoteAvatarPlaceholder({
+  peer,
+  remoteStream,
+  speaking,
+  peerLevelRef,
+  isAudioMuted,
+  isMinimized,
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col items-center justify-center text-center",
+        isMinimized ? "gap-2 p-2 pb-12" : "gap-4 p-6",
+      )}
+    >
+      <div className="relative">
+        {!remoteStream && (
+          <>
+            <div
+              className={cn(
+                "absolute animate-ping rounded-full bg-primary/20 opacity-40",
+                isMinimized ? "-inset-2" : "-inset-4",
+              )}
+            />
+            <div
+              className={cn(
+                "absolute animate-pulse rounded-full bg-primary/10 opacity-30",
+                isMinimized ? "-inset-4" : "-inset-8",
+              )}
+            />
+          </>
+        )}
+        <Avatar
+          src={peer?.avatarUrl}
+          name={peer?.name}
+          className={cn(
+            "relative ring-background/50 shadow-2xl",
+            isMinimized
+              ? "h-20 w-20 text-xl ring-2"
+              : "h-28 w-28 text-3xl ring-4",
+          )}
+        />
+        <SpeakingRing
+          active={speaking}
+          levelRef={peerLevelRef}
+          className={cn(
+            "rounded-full",
+            isMinimized ? "-inset-1.5" : "-inset-2",
+          )}
+        />
+      </div>
+
+      <div className="space-y-1">
+        {!isMinimized && (
+          <div className="flex items-center justify-center">
+            <h3 className="text-xl font-semibold text-white tracking-tight">
+              {peer?.name || "Participant"}
+            </h3>
+            <LevelBars active={speaking} levelRef={peerLevelRef} />
+          </div>
+        )}
+        {isAudioMuted && (
+          <p className="flex items-center justify-center gap-1.5 text-xs text-red-400">
+            <MicOff className="h-3.5 w-3.5" />
+            <span>Microphone muted</span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Subcomponent: Picture-in-picture local camera or screen preview feed
+function LocalPipPreview({
+  localVideoRef,
+  localAspect,
+  pipWidth,
+  hasLocalVideo,
+  currentUser,
+  isScreenSharing,
+  cameraFacing,
+  isAudioMuted,
+  selfActive,
+  selfLevelRef,
+}) {
+  return (
+    <div
+      style={{
+        aspectRatio: String(localAspect),
+        width: pipWidth,
+        maxHeight: "35vh",
+      }}
+      className="absolute right-4 top-4 z-20 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl"
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <video
+        ref={localVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className={cn(
+          "h-full w-full",
+          isScreenSharing
+            ? "bg-black object-contain"
+            : cn(
+                "object-cover",
+                cameraFacing !== "environment" && "scale-x-[-1]",
+              ),
+          !hasLocalVideo && "hidden",
+        )}
+      />
+
+      {!hasLocalVideo && (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-zinc-900 p-2">
+          <Avatar
+            src={currentUser?.avatarUrl}
+            name={currentUser?.name}
+            className="h-12 w-12 text-sm"
+          />
+          <span className="flex items-center gap-1 text-[11px] text-zinc-400">
+            <VideoOff className="h-3 w-3" />
+            <span>Camera off</span>
+          </span>
+        </div>
+      )}
+
+      <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-md">
+        <span>You</span>
+        {isAudioMuted && <MicOff className="h-2.5 w-2.5 text-red-400" />}
+        <LevelBars
+          active={selfActive}
+          levelRef={selfLevelRef}
+          className="h-2.5"
+        />
+      </div>
+
+      <SpeakingRing
+        active={selfActive}
+        levelRef={selfLevelRef}
+        inset
+        className="inset-0 rounded-[inherit]"
+      />
+    </div>
+  );
+}
+
+// Subcomponent: Toggle button to switch between fit-to-screen and fill-screen modes
+function FitFillToggleButton({ mode, onToggle }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      onDoubleClick={(e) => e.stopPropagation()}
+      aria-label={mode === "fit" ? "Fill screen" : "Fit to screen"}
+      title={mode === "fit" ? "Fill screen" : "Fit to screen"}
+      className="absolute left-4 top-21 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition hover:bg-black/70"
+    >
+      {mode === "fit" ? (
+        <Expand className="h-4 w-4" />
+      ) : (
+        <Shrink className="h-4 w-4" />
+      )}
+    </button>
+  );
+}
+
 export function VideoGrid({
   localStream,
   remoteStream,
@@ -216,20 +378,23 @@ export function VideoGrid({
   peerMediaState,
   isScreenSharing = false,
   isMinimized = false,
-  mirrorRemote = true, // mirror the peer's CAMERA like your own preview (never a screen share)
+  mirrorRemote = true,
   peerSpeaking = false,
   peerLevelRef = null,
   selfSpeaking = false,
   selfLevelRef = null,
-  cameraFacing = "user", // "environment" = your rear camera: show it as is, not mirrored
+  cameraFacing = "user",
 }) {
+  // Element and stream refs
   const containerRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const backdropRef = useRef(null);
-  const [fitOverride, setFitOverride] = useState(null); // null = auto | "fit" | "fill"
 
-  // VIDEO-ONLY streams: audio can never be played from these elements.
+  // State hooks
+  const [fitOverride, setFitOverride] = useState(null);
+
+  // Video-only track streams to ensure no secondary audio paths
   const localVideoStream = useMemo(
     () => (localStream ? new MediaStream(localStream.getVideoTracks()) : null),
     [localStream],
@@ -240,6 +405,7 @@ export function VideoGrid({
     [remoteStream],
   );
 
+  // Derived media presence and speaking state flags
   const hasRemoteVideo =
     callType === "video" &&
     remoteStream &&
@@ -260,7 +426,7 @@ export function VideoGrid({
   const speaking = Boolean(peerSpeaking) && !peerMediaState.isAudioMuted;
   const selfActive = Boolean(selfSpeaking) && !isAudioMuted;
 
-  // ---- measurements -------------------------------------------------------
+  // Measurement and element hooks
   useBindVideo(remoteVideoRef, remoteVideoStream, [
     peerMediaState.isVideoDisabled,
   ]);
@@ -272,23 +438,24 @@ export function VideoGrid({
     isMinimized,
   ]);
 
-  // New source type (camera <-> screen) -> back to automatic layout
-  useEffect(() => setFitOverride(null), [peerIsSharingScreen]);
+  // Reset fit override to auto when screen share state changes
+  useEffect(() => {
+    setFitOverride(null);
+  }, [peerIsSharingScreen]);
 
-  // ---- decide how to show the remote video --------------------------------
+  // Aspect ratio calculations and layout mode resolution
   const known =
     remoteDims.w > 0 && remoteDims.h > 0 && viewport.w > 0 && viewport.h > 0;
 
-  let autoMode = "fit"; // safest default: show the whole frame
+  let autoMode = "fit";
   if (known && !peerIsSharingScreen) {
     const src = remoteDims.w / remoteDims.h;
     const view = viewport.w / viewport.h;
     const gap = Math.max(src / view, view / src);
     autoMode = gap <= FILL_TOLERANCE ? "fill" : "fit";
   }
-  const mode = fitOverride ?? autoMode; // screen shares are never auto-cropped
+  const mode = fitOverride ?? autoMode;
 
-  // Mirror a selfie-style camera like your own preview; never a screen share or the other person's REAR camera
   const mirrorRemoteVideo =
     mirrorRemote && !peerIsSharingScreen && !peerMediaState.isRearCamera;
   const showBackdrop =
@@ -298,8 +465,6 @@ export function VideoGrid({
     showBackdrop,
   ]);
 
-  // "fit" = a box with the video's OWN shape (phone-shaped for a phone camera),
-  // as large as possible inside the space between the header and the controls.
   const insets = isMinimized
     ? { top: 0, bottom: 0, side: 0 }
     : { top: HEADER_INSET, bottom: CONTROLS_INSET, side: SIDE_PAD };
@@ -317,7 +482,6 @@ export function VideoGrid({
 
   const toggleFit = () => setFitOverride(mode === "fit" ? "fill" : "fit");
 
-  // ---- local preview shape follows the local camera / screen shape --------
   const localAspect =
     hasLocalVideo && localDims.w > 0 && localDims.h > 0
       ? localDims.w / localDims.h
@@ -333,9 +497,7 @@ export function VideoGrid({
       onDoubleClick={isMinimized ? undefined : toggleFit}
       className="relative h-full w-full select-none overflow-hidden bg-zinc-950 flex items-center justify-center"
     >
-      {/* Remote audio is played by <RemoteAudio/> (mounted in CallProvider), not here. */}
-
-      {/* 0. DIMMED, BLURRED BACKDROP behind a framed camera video */}
+      {/* Blurred ambient backdrop behind fitted remote video */}
       {showBackdrop && (
         <video
           ref={backdropRef}
@@ -350,7 +512,7 @@ export function VideoGrid({
         />
       )}
 
-      {/* 1. REMOTE FEED */}
+      {/* Main remote video feed */}
       <div
         className={cn(
           "absolute inset-0 z-10 flex items-center justify-center",
@@ -404,146 +566,37 @@ export function VideoGrid({
         </div>
       </div>
 
+      {/* Fallback avatar view when remote video is off */}
       {!hasRemoteVideo && (
-        <div
-          className={cn(
-            "flex flex-col items-center justify-center text-center",
-            isMinimized ? "gap-2 p-2 pb-12" : "gap-4 p-6",
-          )}
-        >
-          <div className="relative">
-            {/* Gentle ripple only while we are still waiting for the other side's media */}
-            {!remoteStream && (
-              <>
-                <div
-                  className={cn(
-                    "absolute animate-ping rounded-full bg-primary/20 opacity-40",
-                    isMinimized ? "-inset-2" : "-inset-4",
-                  )}
-                />
-                <div
-                  className={cn(
-                    "absolute animate-pulse rounded-full bg-primary/10 opacity-30",
-                    isMinimized ? "-inset-4" : "-inset-8",
-                  )}
-                />
-              </>
-            )}
-            <Avatar
-              src={peer?.avatarUrl}
-              name={peer?.name}
-              className={cn(
-                "relative ring-background/50 shadow-2xl",
-                isMinimized
-                  ? "h-20 w-20 text-xl ring-2"
-                  : "h-28 w-28 text-3xl ring-4",
-              )}
-            />
-            <SpeakingRing
-              active={speaking}
-              levelRef={peerLevelRef}
-              className={cn(
-                "rounded-full",
-                isMinimized ? "-inset-1.5" : "-inset-2",
-              )}
-            />
-          </div>
-          <div className="space-y-1">
-            {!isMinimized && (
-              <div className="flex items-center justify-center">
-                <h3 className="text-xl font-semibold text-white tracking-tight">
-                  {peer?.name || "Participant"}
-                </h3>
-                <LevelBars active={speaking} levelRef={peerLevelRef} />
-              </div>
-            )}
-            {peerMediaState.isAudioMuted && (
-              <p className="flex items-center justify-center gap-1.5 text-xs text-red-400">
-                <MicOff className="h-3.5 w-3.5" />
-                <span>Microphone muted</span>
-              </p>
-            )}
-          </div>
-        </div>
+        <RemoteAvatarPlaceholder
+          peer={peer}
+          remoteStream={remoteStream}
+          speaking={speaking}
+          peerLevelRef={peerLevelRef}
+          isAudioMuted={peerMediaState.isAudioMuted}
+          isMinimized={isMinimized}
+        />
       )}
 
-      {/* 2. FIT / FILL TOGGLE (also: double-click the video) */}
+      {/* Fit / Fill toggle button */}
       {hasRemoteVideo && !isMinimized && (
-        <button
-          type="button"
-          onClick={toggleFit}
-          onDoubleClick={(e) => e.stopPropagation()}
-          aria-label={mode === "fit" ? "Fill screen" : "Fit to screen"}
-          title={mode === "fit" ? "Fill screen" : "Fit to screen"}
-          className="absolute left-4 top-21 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-white backdrop-blur-md transition hover:bg-black/70"
-        >
-          {mode === "fit" ? (
-            <Expand className="h-4 w-4" />
-          ) : (
-            <Shrink className="h-4 w-4" />
-          )}
-        </button>
+        <FitFillToggleButton mode={mode} onToggle={toggleFit} />
       )}
 
-      {/* 3. LOCAL FEED (picture-in-picture, shaped like your own camera / screen) */}
+      {/* Picture-in-picture local video preview */}
       {!isMinimized && callType === "video" && (
-        <div
-          style={{
-            aspectRatio: String(localAspect),
-            width: pipWidth,
-            maxHeight: "35vh",
-          }}
-          className="absolute right-4 top-4 z-20 overflow-hidden rounded-2xl bg-zinc-900 border-2 border-white/20 shadow-2xl"
-          onDoubleClick={(e) => e.stopPropagation()}
-        >
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className={cn(
-              "h-full w-full",
-              isScreenSharing
-                ? "bg-black object-contain"
-                : cn(
-                    "object-cover",
-                    cameraFacing !== "environment" && "scale-x-[-1]",
-                  ),
-              !hasLocalVideo && "hidden",
-            )}
-          />
-
-          {!hasLocalVideo && (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-zinc-900 p-2">
-              <Avatar
-                src={currentUser?.avatarUrl}
-                name={currentUser?.name}
-                className="h-12 w-12 text-sm"
-              />
-              <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                <VideoOff className="h-3 w-3" />
-                <span>Camera off</span>
-              </span>
-            </div>
-          )}
-
-          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-md">
-            <span>You</span>
-            {isAudioMuted && <MicOff className="h-2.5 w-2.5 text-red-400" />}
-            <LevelBars
-              active={selfActive}
-              levelRef={selfLevelRef}
-              className="h-2.5"
-            />
-          </div>
-
-          <SpeakingRing
-            active={selfActive}
-            levelRef={selfLevelRef}
-            inset
-            className="inset-0 rounded-[inherit]"
-          />
-        </div>
+        <LocalPipPreview
+          localVideoRef={localVideoRef}
+          localAspect={localAspect}
+          pipWidth={pipWidth}
+          hasLocalVideo={hasLocalVideo}
+          currentUser={currentUser}
+          isScreenSharing={isScreenSharing}
+          cameraFacing={cameraFacing}
+          isAudioMuted={isAudioMuted}
+          selfActive={selfActive}
+          selfLevelRef={selfLevelRef}
+        />
       )}
     </div>
   );

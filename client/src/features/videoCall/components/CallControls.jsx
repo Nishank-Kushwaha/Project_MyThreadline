@@ -9,7 +9,36 @@ import {
   Minimize2,
 } from "lucide-react";
 import { DevicePicker } from "./DevicePicker";
+import { cn } from "@/lib/utils";
 
+// Subcomponent: Circular call action button with active state styling
+function CallControlButton({
+  onClick,
+  label,
+  isActive = false,
+  activeClassName = "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  inactiveClassName = "bg-muted text-foreground hover:bg-muted/80",
+  className,
+  children,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className={cn(
+        "flex h-12 w-12 items-center justify-center rounded-full transition active:scale-95",
+        isActive ? activeClassName : inactiveClassName,
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Media and state control dock for active voice and video calls
 export function CallControls({
   isAudioMuted,
   isVideoDisabled,
@@ -21,86 +50,70 @@ export function CallControls({
   onToggleMinimize,
   onEndCall,
 }) {
+  // Check browser display media capture support for screen sharing
   const supportsScreenShare = Boolean(navigator.mediaDevices?.getDisplayMedia);
 
   return (
     <div className="relative flex items-center justify-center gap-3 rounded-full bg-background/80 p-2.5 shadow-2xl backdrop-blur-xl border border-border/40">
-      {/* Toggle Microphone */}
-      <button
-        type="button"
+      {/* Microphone toggle */}
+      <CallControlButton
         onClick={onToggleMic}
-        aria-label={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
-        className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
-          isAudioMuted
-            ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            : "bg-muted text-foreground hover:bg-muted/80"
-        }`}
+        label={isAudioMuted ? "Unmute microphone" : "Mute microphone"}
+        isActive={isAudioMuted}
       >
         {isAudioMuted ? (
           <MicOff className="h-5 w-5" />
         ) : (
           <Mic className="h-5 w-5" />
         )}
-      </button>
+      </CallControlButton>
 
-      {/* Toggle Camera (Only for video calls or if upgraded) */}
+      {/* Camera toggle (video calls only) */}
       {callType === "video" && (
-        <button
-          type="button"
+        <CallControlButton
           onClick={onToggleCamera}
-          aria-label={isVideoDisabled ? "Turn on camera" : "Turn off camera"}
-          className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
-            isVideoDisabled
-              ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              : "bg-muted text-foreground hover:bg-muted/80"
-          }`}
+          label={isVideoDisabled ? "Turn on camera" : "Turn off camera"}
+          isActive={isVideoDisabled}
         >
           {isVideoDisabled ? (
             <VideoOff className="h-5 w-5" />
           ) : (
             <Video className="h-5 w-5" />
           )}
-        </button>
+        </CallControlButton>
       )}
 
-      {/* Screen Sharing (Desktop / Supported browsers) */}
+      {/* Screen sharing (supported desktop browsers on video calls) */}
       {supportsScreenShare && callType === "video" && (
-        <button
-          type="button"
+        <CallControlButton
           onClick={onToggleScreenShare}
-          aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
-          className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
-            isScreenSharing
-              ? "bg-primary text-primary-foreground hover:bg-primary/90"
-              : "bg-muted text-foreground hover:bg-muted/80"
-          }`}
+          label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+          isActive={isScreenSharing}
+          activeClassName="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <ScreenShare className="h-5 w-5" />
-        </button>
+        </CallControlButton>
       )}
 
-      {/* Audio & video device settings (microphone, camera, speaker) */}
+      {/* Audio and video input/output device picker popover */}
       <DevicePicker />
 
-      {/* Minimize / Floating PiP Toggle */}
-      <button
-        type="button"
+      {/* Minimize to picture-in-picture floating view */}
+      <CallControlButton
         onClick={onToggleMinimize}
-        aria-label="Minimize call"
-        className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-foreground transition hover:bg-muted/80"
+        label="Minimize call"
       >
         <Minimize2 className="h-5 w-5" />
-      </button>
+      </CallControlButton>
 
-      {/* End Call Button */}
-      <button
-        type="button"
+      {/* End call action */}
+      <CallControlButton
         onClick={onEndCall}
-        aria-label="End call"
-        className="flex h-12 w-12 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-red-600/30 transition hover:bg-red-700 active:scale-95"
+        label="End call"
+        className="bg-red-600 text-white shadow-lg shadow-red-600/30 hover:bg-red-700"
       >
         <PhoneOff className="h-5 w-5" />
-      </button>
+      </CallControlButton>
     </div>
   );
 }
