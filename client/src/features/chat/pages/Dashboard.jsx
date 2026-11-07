@@ -1,52 +1,234 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { Menu, X, LogOut, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useAuth } from "@/features/auth/context/AuthContext";
 import { useSocket } from "@/app/providers/SocketContext";
+import { useE2EE } from "@/features/e2ee/context/E2EEContext";
 import { listRoomsRequest } from "@/features/chat/api/roomsApi";
-import { Button } from "@/components/ui/button";
-import { RoomList } from "../components/RoomList";
-import { ChatWindow } from "../components/ChatWindow";
-import { NewChatDialog } from "../components/NewChatDialog";
-import { cn, resolveAvatarUrl } from "@/lib/utils";
-import { Menu, X, LogOut, Loader2 } from "lucide-react";
-import { Avatar } from "@/components/ui/avatar";
-import { MembersPanel } from "../components/MembersPanel";
-import { NotificationBanner } from "@/features/notifications/components/NotificationBanner";
+import { decryptPreview } from "@/features/e2ee/lib/messages";
 import {
   useNotificationClicks,
   useUnreadTitle,
 } from "@/features/notifications/hooks/useChatNotifications";
-import { useE2EE } from "@/features/e2ee/context/E2EEContext";
-import { decryptPreview } from "@/features/e2ee/lib/messages";
-import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Avatar } from "@/components/ui/avatar";
+import { RoomList } from "../components/RoomList";
+import { ChatWindow } from "../components/ChatWindow";
+import { NewChatDialog } from "../components/NewChatDialog";
+import { MembersPanel } from "../components/MembersPanel";
+import { NotificationBanner } from "@/features/notifications/components/NotificationBanner";
+import { cn } from "@/lib/utils";
 
-// Sidebar width limits for md+ screens (like WhatsApp Web)
+// Sidebar width limits for md+ screens
 const SIDEBAR_MIN = 280;
-const SIDEBAR_DEFAULT = 320; // same as the old w-80
+const SIDEBAR_DEFAULT = 320;
 const SIDEBAR_KEY = "threadline:sidebar-width";
 
-// The sidebar can grow up to half of the screen width
 const getSidebarMax = () =>
   Math.max(SIDEBAR_MIN, Math.floor(window.innerWidth / 2));
 
 const clampSidebar = (width) =>
   Math.min(Math.max(width, SIDEBAR_MIN), getSidebarMax());
 
+// Subcomponent: Header section for sidebar with brand, user avatar link and mobile close button
+function SidebarHeader({ user, onCloseSidebar }) {
+  return (
+    <div className="flex items-center justify-between p-4">
+      <span className="text-lg font-extrabold tracking-tight">Threadline</span>
+      <div className="flex items-center gap-2">
+        <Link to="/profile" title="Edit profile">
+          <Avatar
+            src={user?.avatarUrl}
+            name={user?.name}
+            className="h-9 w-9 text-sm"
+          />
+        </Link>
+        <button
+          onClick={onCloseSidebar}
+          aria-label="Close conversations"
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Subcomponent: Bottom action footer for sidebar with sign-out trigger
+function SidebarFooter({ onOpenLogout }) {
+  return (
+    <div className="border-t border-border p-3 bg-muted/20">
+      <button
+        type="button"
+        onClick={onOpenLogout}
+        aria-label="Sign out"
+        className="group flex w-full items-center justify-center gap-2 rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-xs transition-all hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-[0.98]"
+      >
+        <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
+        <span>Sign out</span>
+      </button>
+    </div>
+  );
+}
+
+// Subcomponent: Draggable divider for resizable sidebar on desktop
+function ResizeHandle({
+  sidebarWidth,
+  isResizing,
+  onStartResize,
+  onResetResize,
+  onKeyDown,
+}) {
+  return (
+    <div className="relative hidden w-0 shrink-0 md:block">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize conversations"
+        aria-valuenow={sidebarWidth}
+        aria-valuemin={SIDEBAR_MIN}
+        aria-valuemax={getSidebarMax()}
+        tabIndex={0}
+        onPointerDown={onStartResize}
+        onDoubleClick={onResetResize}
+        onKeyDown={onKeyDown}
+        className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize touch-none outline-none"
+      >
+        <span
+          className={cn(
+            "pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary transition-opacity",
+            isResizing
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+          )}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Subcomponent: Default view displayed when no chat room is selected
+function EmptyChatPlaceholder({ onOpenSidebar }) {
+  return (
+    <div className="relative flex h-full items-center justify-center p-6 text-center">
+      <button
+        onClick={onOpenSidebar}
+        aria-label="Open conversations"
+        className="absolute left-4 top-4 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+      <div>
+        <p className="text-lg font-bold">Pick a conversation</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Choose one from the left, or start a new chat.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// Subcomponent: Confirmation modal for signing out
+function LogoutConfirmDialog({
+  open,
+  isLoggingOut,
+  userName,
+  onConfirm,
+  onCancel,
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-end justify-center sm:items-center sm:p-4">
+      <div
+        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-150"
+        onClick={() => !isLoggingOut && onCancel()}
+      />
+
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="logout-dialog-title"
+        aria-describedby="logout-dialog-desc"
+        className="relative z-10 w-full rounded-t-2xl border border-border bg-card p-6 shadow-2xl transition-all duration-200 sm:max-w-md sm:rounded-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))] animate-in fade-in zoom-in-95"
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+            <LogOut className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3
+              id="logout-dialog-title"
+              className="text-lg font-bold text-foreground"
+            >
+              Sign out of Threadline?
+            </h3>
+            <p
+              id="logout-dialog-desc"
+              className="mt-1.5 text-sm text-muted-foreground"
+            >
+              You will be signed out as{" "}
+              <span className="font-semibold text-foreground">
+                {userName || "User"}
+              </span>
+              . You'll need to enter your password to sign back in.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoggingOut}
+            onClick={onCancel}
+            className="rounded-xl"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isLoggingOut}
+            onClick={onConfirm}
+            className="rounded-xl shadow-xs"
+          >
+            {isLoggingOut ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <span>Signing out…</span>
+              </>
+            ) : (
+              <>
+                <LogOut className="mr-1.5 h-4 w-4" />
+                <span>Sign out</span>
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
+  // Context hooks
   const { user, logout } = useAuth();
   const socket = useSocket();
   const e2ee = useE2EE();
 
+  // State hooks
   const [rooms, setRooms] = useState([]);
   const [activeRoomId, setActiveRoomId] = useState(null);
+  const [previews, setPreviews] = useState({});
   const [isNewChatOpen, setIsNewChatOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMembersOpen, setIsMembersOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [previews, setPreviews] = useState({}); // lastMessage id -> decrypted preview text
-
-  // Resizable sidebar (laptop). Remembered between visits.
+  const [isResizing, setIsResizing] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
       const saved = Number(localStorage.getItem(SIDEBAR_KEY));
@@ -55,26 +237,36 @@ export default function Dashboard() {
       return SIDEBAR_DEFAULT;
     }
   });
-  const [isResizing, setIsResizing] = useState(false);
 
-  // Save once the drag has finished, not on every pixel
+  // Derived state
+  const activeRoom = rooms.find((r) => r.id === activeRoomId) || null;
+
+  // Custom notification hooks
+  useUnreadTitle(rooms);
+  useNotificationClicks((roomId) => {
+    if (rooms.some((r) => r.id === roomId)) {
+      handleSelectRoom(roomId);
+    }
+  });
+
+  // Persist sidebar width after resizing completes
   useEffect(() => {
     if (isResizing) return;
     try {
       localStorage.setItem(SIDEBAR_KEY, String(sidebarWidth));
     } catch {
-      /* storage unavailable: width just won't be remembered */
+      // localStorage may be disabled or unavailable
     }
   }, [sidebarWidth, isResizing]);
 
-  // Window got smaller: pull the sidebar back inside the limits
+  // Adjust sidebar width when window resizes
   useEffect(() => {
     const onResize = () => setSidebarWidth((w) => clampSidebar(w));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // While dragging: resize cursor everywhere, and no accidental text selection
+  // Update body styling during drag resizing
   useEffect(() => {
     if (!isResizing) return;
     const { cursor, userSelect } = document.body.style;
@@ -86,7 +278,7 @@ export default function Dashboard() {
     };
   }, [isResizing]);
 
-  // Handle escape key to close logout confirmation modal
+  // Close logout modal when Escape is pressed
   useEffect(() => {
     if (!showLogoutConfirm) return;
     const onKeyDown = (e) => {
@@ -98,62 +290,85 @@ export default function Dashboard() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [showLogoutConfirm, isLoggingOut]);
 
-  const handleConfirmLogout = async () => {
-    setIsLoggingOut(true);
-    try {
-      await logout();
-      toast.success("Signed out successfully");
-    } catch {
-      toast.error("Error signing out. Please try again.");
-      setIsLoggingOut(false);
-    }
-  };
+  // Initial rooms fetch and handle ?room= query parameter
+  useEffect(() => {
+    const openRoomId = new URLSearchParams(window.location.search).get("room");
 
-  const startResize = (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = sidebarWidth;
-    setIsResizing(true);
+    listRoomsRequest().then(({ data }) => {
+      setRooms(
+        data.rooms.map((room) =>
+          room.id === openRoomId ? { ...room, unreadCount: 0 } : room,
+        ),
+      );
 
-    const onMove = (ev) =>
-      setSidebarWidth(clampSidebar(startWidth + ev.clientX - startX));
-    const onUp = () => {
-      setIsResizing(false);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  };
+      if (openRoomId && data.rooms.some((r) => r.id === openRoomId)) {
+        setActiveRoomId(openRoomId);
+        setIsSidebarOpen(false);
+      }
 
-  // Keyboard: arrows resize (Shift = bigger steps), Home/End jump to the limits
-  const onHandleKeyDown = (e) => {
-    const step = e.shiftKey ? 48 : 16;
-    if (e.key === "ArrowLeft") setSidebarWidth((w) => clampSidebar(w - step));
-    else if (e.key === "ArrowRight")
-      setSidebarWidth((w) => clampSidebar(w + step));
-    else if (e.key === "Home") setSidebarWidth(SIDEBAR_MIN);
-    else if (e.key === "End") setSidebarWidth(getSidebarMax());
-    else return;
-    e.preventDefault();
-  };
+      if (openRoomId) {
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    });
+  }, []);
 
-  // Keep the sidebar live for EVERY room (preview, unread badge, ordering).
+  // Reset members panel when active room changes
+  useEffect(() => {
+    setIsMembersOpen(false);
+  }, [activeRoomId]);
+
+  // Clear unread badge for currently active room
+  useEffect(() => {
+    if (!activeRoomId) return;
+
+    const room = rooms.find((r) => r.id === activeRoomId);
+    if (!room || room.unreadCount === 0) return;
+
+    setRooms((prev) =>
+      prev.map((r) => (r.id === activeRoomId ? { ...r, unreadCount: 0 } : r)),
+    );
+    socket?.emit("message:seen", { roomId: activeRoomId });
+  }, [rooms, activeRoomId, socket]);
+
+  // Re-decrypt previews after backup restoration
+  useEffect(() => {
+    setPreviews({});
+  }, [e2ee.historyVersion]);
+
+  // Decrypt sidebar previews for encrypted messages
+  useEffect(() => {
+    if (e2ee.status !== "ready" || !user?.id) return;
+
+    const pending = rooms.filter(
+      (room) =>
+        room.lastMessage?.e2ee &&
+        previews[room.lastMessage.messageId] === undefined,
+    );
+    if (pending.length === 0) return;
+
+    Promise.all(
+      pending.map(async (room) => [
+        room.lastMessage.messageId,
+        await decryptPreview(room.lastMessage, {
+          roomId: room.id,
+          userId: user.id,
+        }),
+      ]),
+    ).then((entries) => {
+      setPreviews((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+  }, [rooms, e2ee.status, user?.id, previews]);
+
+  // Socket: realtime message updates (new, edited, deleted, system)
   useEffect(() => {
     if (!socket) return;
 
     const handleNewMessage = async ({ roomId, message }) => {
-      // Decrypt BEFORE touching state, so the sidebar never renders the
-      // "🔒 Encrypted message" placeholder for even an instant.
       if (message.encrypted && message.e2ee) {
         const previewText = await decryptPreview(
           { e2ee: message.e2ee, sender: message.sender._id },
           { roomId, userId: user.id },
         );
-
         setPreviews((prev) => ({ ...prev, [message._id]: previewText }));
       }
 
@@ -164,8 +379,6 @@ export default function Dashboard() {
         const updated = prev.map((room) => {
           if (room.id !== roomId) return room;
 
-          // Decrypting takes a moment. If a newer message already became the
-          // preview in the meantime, don't step back to an older one.
           const isNewest =
             !room.lastMessage?.createdAt ||
             new Date(message.createdAt) >= new Date(room.lastMessage.createdAt);
@@ -178,6 +391,8 @@ export default function Dashboard() {
                   text: message.text,
                   sender: message.sender._id,
                   createdAt: message.createdAt,
+                  system: message.system,
+                  attachments: message.attachments,
                   encrypted: message.encrypted,
                   e2ee: message.e2ee,
                 }
@@ -195,8 +410,6 @@ export default function Dashboard() {
       });
     };
 
-    // An edit/delete only touches the sidebar if it happened to the room's
-    // CURRENT preview message — compare by messageId, not by content.
     const handlePreviewTextChange =
       (newText) =>
       ({ roomId, messageId }) => {
@@ -224,7 +437,6 @@ export default function Dashboard() {
       senderId,
     }) => {
       if (e2ee) {
-        // Decrypt first, so the preview changes in one step with no placeholder.
         const previewText = await decryptPreview(
           { e2ee, sender: senderId },
           { roomId, userId: user.id },
@@ -250,7 +462,6 @@ export default function Dashboard() {
         messageId,
       });
 
-    // Group events update the preview and ordering, but never the unread badge.
     const handleSystemMessage = ({ roomId, message }) => {
       setRooms((prev) => {
         const updated = prev.map((room) =>
@@ -281,6 +492,7 @@ export default function Dashboard() {
     socket.on("message:edited", handleEdited);
     socket.on("message:deleted", handleDeleted);
     socket.on("message:system", handleSystemMessage);
+
     return () => {
       socket.off("message:new", handleNewMessage);
       socket.off("message:edited", handleEdited);
@@ -289,7 +501,7 @@ export default function Dashboard() {
     };
   }, [socket, activeRoomId, user?.id]);
 
-  // Someone started a chat with me / added me to a group while I'm online.
+  // Socket: newly created room
   useEffect(() => {
     if (!socket) return;
     const handleRoomNew = (room) => {
@@ -299,8 +511,7 @@ export default function Dashboard() {
     return () => socket.off("room:new", handleRoomNew);
   }, [socket]);
 
-  // Live online/offline for the people I chat with. Only private rooms carry a
-  // single "other user", so that's what we match against.
+  // Socket: presence updates for contacts
   useEffect(() => {
     if (!socket) return;
 
@@ -318,9 +529,10 @@ export default function Dashboard() {
     return () => socket.off("presence:update", handlePresence);
   }, [socket]);
 
-  // Live member count for group rooms, and remove rooms when deleted.
+  // Socket: member changes and room removal
   useEffect(() => {
     if (!socket) return;
+
     const handleMemberAdded = ({ roomId }) => {
       setRooms((prev) =>
         prev.map((room) =>
@@ -330,6 +542,7 @@ export default function Dashboard() {
         ),
       );
     };
+
     const handleMemberRemoved = ({ roomId }) => {
       setRooms((prev) =>
         prev.map((room) =>
@@ -339,14 +552,17 @@ export default function Dashboard() {
         ),
       );
     };
+
     const handleRoomRemoved = ({ roomId }) => {
       setRooms((prev) => prev.filter((room) => room.id !== roomId));
       setActiveRoomId((prev) => (prev === roomId ? null : prev));
       setIsMembersOpen(false);
     };
+
     socket.on("room:member-added", handleMemberAdded);
     socket.on("room:member-removed", handleMemberRemoved);
     socket.on("room:removed", handleRoomRemoved);
+
     return () => {
       socket.off("room:member-added", handleMemberAdded);
       socket.off("room:member-removed", handleMemberRemoved);
@@ -354,7 +570,7 @@ export default function Dashboard() {
     };
   }, [socket]);
 
-  // Someone renamed a group or changed its photo while I'm online.
+  // Socket: group name and avatar updates
   useEffect(() => {
     if (!socket) return;
 
@@ -381,8 +597,7 @@ export default function Dashboard() {
     };
   }, [socket]);
 
-  // My role in a group changed while I'm online (promoted, dismissed, or
-  // auto-promoted when the only admin left): keep the sidebar's copy in sync.
+  // Socket: group admin promotions and demotions
   useEffect(() => {
     if (!socket) return;
 
@@ -390,7 +605,6 @@ export default function Dashboard() {
       (isAdmin) =>
       ({ roomId, memberId }) => {
         if (memberId !== user?.id) return;
-
         setRooms((prev) =>
           prev.map((room) =>
             room.id === roomId ? { ...room, isAdmin } : room,
@@ -410,108 +624,72 @@ export default function Dashboard() {
     };
   }, [socket, user?.id]);
 
-  // This handles a notification click when no tab was open, where the service worker opens /?room=<id>
-  useEffect(() => {
-    // Read BEFORE fetching: in dev, StrictMode runs this effect twice, and both
-    // runs must see the same value.
-    const openRoomId = new URLSearchParams(window.location.search).get("room");
+  // Actions: resize handling
+  const startResize = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    setIsResizing(true);
 
-    listRoomsRequest().then(({ data }) => {
-      // The room being opened is about to be seen, so it never shows a badge.
-      // It's cleared in the same update that stores the list, so a later
-      // response can't bring the old count back.
-      setRooms(
-        data.rooms.map((room) =>
-          room.id === openRoomId ? { ...room, unreadCount: 0 } : room,
-        ),
-      );
+    const onMove = (ev) =>
+      setSidebarWidth(clampSidebar(startWidth + ev.clientX - startX));
 
-      if (openRoomId && data.rooms.some((r) => r.id === openRoomId)) {
-        setActiveRoomId(openRoomId);
-        setIsSidebarOpen(false);
-      }
+    const onUp = () => {
+      setIsResizing(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
 
-      if (openRoomId) {
-        window.history.replaceState(null, "", window.location.pathname);
-      }
-    });
-  }, []);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
 
-  useEffect(() => {
-    setIsMembersOpen(false);
-  }, [activeRoomId]);
+  const handleResizeKeyDown = (e) => {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === "ArrowLeft") setSidebarWidth((w) => clampSidebar(w - step));
+    else if (e.key === "ArrowRight")
+      setSidebarWidth((w) => clampSidebar(w + step));
+    else if (e.key === "Home") setSidebarWidth(SIDEBAR_MIN);
+    else if (e.key === "End") setSidebarWidth(getSidebarMax());
+    else return;
+    e.preventDefault();
+  };
 
-  // The room that's open never has unread messages. However a stale count got
-  // there (a late room-list response, a replaced room object), clear it and
-  // tell the server.
-  useEffect(() => {
-    if (!activeRoomId) return;
+  // Actions: logout confirmation
+  const handleConfirmLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+      toast.success("Signed out successfully");
+    } catch {
+      toast.error("Error signing out. Please try again.");
+      setIsLoggingOut(false);
+    }
+  };
 
-    const room = rooms.find((r) => r.id === activeRoomId);
-    if (!room || room.unreadCount === 0) return;
-
-    setRooms((prev) =>
-      prev.map((r) => (r.id === activeRoomId ? { ...r, unreadCount: 0 } : r)),
-    );
-    socket?.emit("message:seen", { roomId: activeRoomId });
-  }, [rooms, activeRoomId, socket]);
-
-  // A restored backup can make older previews readable: decrypt them again.
-  useEffect(() => {
-    setPreviews({});
-  }, [e2ee.historyVersion]);
-
-  // Decrypt the sidebar preview of rooms whose last message is encrypted. The
-  // server only holds ciphertext, so each browser reads it for itself.
-  useEffect(() => {
-    if (e2ee.status !== "ready" || !user?.id) return;
-
-    const pending = rooms.filter(
-      (room) =>
-        room.lastMessage?.e2ee &&
-        previews[room.lastMessage.messageId] === undefined,
-    );
-    if (pending.length === 0) return;
-
-    Promise.all(
-      pending.map(async (room) => [
-        room.lastMessage.messageId,
-        await decryptPreview(room.lastMessage, {
-          roomId: room.id,
-          userId: user.id,
-        }),
-      ]),
-    ).then((entries) => {
-      setPreviews((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
-    });
-  }, [rooms, e2ee.status, user?.id, previews]);
-
+  // Actions: room selection and creation
   const handleSelectRoom = (roomId) => {
     setActiveRoomId(roomId);
     setRooms((prev) =>
       prev.map((r) => (r.id === roomId ? { ...r, unreadCount: 0 } : r)),
     );
-    setIsSidebarOpen(false); // on small screens, reveal the chat after picking one
+    setIsSidebarOpen(false);
   };
 
   const handleRoomCreated = (room) => {
     setRooms((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
-    socket?.emit("room:join", room.id); // this socket connected before the room existed
+    socket?.emit("room:join", room.id);
     setActiveRoomId(room.id);
     setIsNewChatOpen(false);
     setIsSidebarOpen(false);
   };
 
-  useUnreadTitle(rooms);
-  useNotificationClicks((roomId) => {
-    if (rooms.some((r) => r.id === roomId)) handleSelectRoom(roomId);
-  });
-
-  const activeRoom = rooms.find((r) => r.id === activeRoomId) || null;
-
   return (
     <div className="flex h-dvh">
-      {/* Dark backdrop behind the drawer (small screens only); click to close */}
+      {/* Mobile drawer backdrop */}
       {isSidebarOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/60 md:hidden"
@@ -519,8 +697,7 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Small screens: fixed drawer that slides in/out.
-          md and up: normal static column, always visible. */}
+      {/* Sidebar drawer / column */}
       <aside
         style={{ "--sidebar-w": `${sidebarWidth}px` }}
         className={cn(
@@ -529,27 +706,10 @@ export default function Dashboard() {
           isSidebarOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex items-center justify-between p-4">
-          <span className="text-lg font-extrabold tracking-tight">
-            Threadline
-          </span>
-          <div className="flex items-center gap-2">
-            <Link to="/profile" title="Edit profile">
-              <Avatar
-                src={user?.avatarUrl}
-                name={user?.name}
-                className="h-9 w-9 text-sm"
-              />
-            </Link>
-            <button
-              onClick={() => setIsSidebarOpen(false)}
-              aria-label="Close conversations"
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
+        <SidebarHeader
+          user={user}
+          onCloseSidebar={() => setIsSidebarOpen(false)}
+        />
 
         <div className="px-4 pb-3">
           <Button className="w-full" onClick={() => setIsNewChatOpen(true)}>
@@ -567,47 +727,19 @@ export default function Dashboard() {
           previews={previews}
         />
 
-        <div className="border-t border-border p-3 bg-muted/20">
-          <button
-            type="button"
-            onClick={() => setShowLogoutConfirm(true)}
-            aria-label="Sign out"
-            className="group flex w-full items-center justify-center gap-2 rounded-xl border border-border/70 bg-background/60 px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-xs transition-all hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-[0.98]"
-          >
-            <LogOut className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" />
-            <span>Sign out</span>
-          </button>
-        </div>
+        <SidebarFooter onOpenLogout={() => setShowLogoutConfirm(true)} />
       </aside>
 
-      {/* Drag handle between the list and the chat (md and up only).
-          Double-click resets the width. */}
-      <div className="relative hidden w-0 shrink-0 md:block">
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize conversations"
-          aria-valuenow={sidebarWidth}
-          aria-valuemin={SIDEBAR_MIN}
-          aria-valuemax={getSidebarMax()}
-          tabIndex={0}
-          onPointerDown={startResize}
-          onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT)}
-          onKeyDown={onHandleKeyDown}
-          className="group absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize touch-none outline-none"
-        >
-          <span
-            className={cn(
-              "pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-primary transition-opacity",
-              isResizing
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
-            )}
-          />
-        </div>
-      </div>
+      {/* Resizer divider handle */}
+      <ResizeHandle
+        sidebarWidth={sidebarWidth}
+        isResizing={isResizing}
+        onStartResize={startResize}
+        onResetResize={() => setSidebarWidth(SIDEBAR_DEFAULT)}
+        onKeyDown={handleResizeKeyDown}
+      />
 
-      {/* min-w-0 stops long messages from stretching this column past the screen */}
+      {/* Main chat viewport */}
       <main className="min-w-0 flex-1">
         {activeRoom ? (
           <ChatWindow
@@ -619,21 +751,9 @@ export default function Dashboard() {
             onOpenMembers={() => setIsMembersOpen(true)}
           />
         ) : (
-          <div className="relative flex h-full items-center justify-center p-6 text-center">
-            <button
-              onClick={() => setIsSidebarOpen(true)}
-              aria-label="Open conversations"
-              className="absolute left-4 top-4 rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground md:hidden"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <div>
-              <p className="text-lg font-bold">Pick a conversation</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Choose one from the left, or start a new chat.
-              </p>
-            </div>
-          </div>
+          <EmptyChatPlaceholder
+            onOpenSidebar={() => setIsSidebarOpen(true)}
+          />
         )}
       </main>
 
@@ -653,78 +773,13 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Logout Confirmation Dialog (Bottom sheet on mobile, centered modal on desktop) */}
-      {showLogoutConfirm && (
-        <div className="fixed inset-0 z-60 flex items-end justify-center sm:items-center sm:p-4">
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-150"
-            onClick={() => !isLoggingOut && setShowLogoutConfirm(false)}
-          />
-
-          <div
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="logout-dialog-title"
-            aria-describedby="logout-dialog-desc"
-            className="relative z-10 w-full rounded-t-2xl border border-border bg-card p-6 shadow-2xl transition-all duration-200 sm:max-w-md sm:rounded-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))] animate-in fade-in zoom-in-95"
-          >
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
-                <LogOut className="h-6 w-6" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3
-                  id="logout-dialog-title"
-                  className="text-lg font-bold text-foreground"
-                >
-                  Sign out of Threadline?
-                </h3>
-                <p
-                  id="logout-dialog-desc"
-                  className="mt-1.5 text-sm text-muted-foreground"
-                >
-                  You will be signed out as{" "}
-                  <span className="font-semibold text-foreground">
-                    {user?.name || "User"}
-                  </span>
-                  . You'll need to enter your password to sign back in.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isLoggingOut}
-                onClick={() => setShowLogoutConfirm(false)}
-                className="rounded-xl"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                disabled={isLoggingOut}
-                onClick={handleConfirmLogout}
-                className="rounded-xl shadow-xs"
-              >
-                {isLoggingOut ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    <span>Signing out…</span>
-                  </>
-                ) : (
-                  <>
-                    <LogOut className="mr-1.5 h-4 w-4" />
-                    <span>Sign out</span>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <LogoutConfirmDialog
+        open={showLogoutConfirm}
+        isLoggingOut={isLoggingOut}
+        userName={user?.name}
+        onConfirm={handleConfirmLogout}
+        onCancel={() => setShowLogoutConfirm(false)}
+      />
     </div>
   );
 }
