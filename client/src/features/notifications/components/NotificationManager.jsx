@@ -7,21 +7,23 @@ import {
 } from "../hooks/useChatNotifications";
 import { usePushSubscription } from "../hooks/usePushSubscription";
 
-// Mounted once for the whole app, so notifications and the push subscription
-// work on every page (Profile included), not only on the dashboard.
+// Application-wide headless controller synchronizing push subscriptions and incoming message alerts
 export function NotificationManager() {
+  // Context and router hooks
   const { user } = useAuth();
   const socket = useSocket();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
+  // Push subscription and chat alert hooks
   usePushSubscription(user?.id);
   useChatNotifications({ socket, user });
 
-  // On the dashboard, Dashboard itself opens the room. On any other page, go
-  // to the dashboard; it opens the room from ?room=<id> when it mounts.
+  // Navigate to dashboard with room query param when notification is clicked outside dashboard
   useNotificationClicks((roomId) => {
-    if (pathname !== "/") navigate(`/?room=${roomId}`);
+    if (pathname !== "/") {
+      navigate(`/?room=${roomId}`);
+    }
   });
 
   return null;
